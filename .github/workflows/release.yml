@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Release
+
+on:
+  push:
+    tags: [ 'v[0-9]+.[0-9]+.[0-9]+' ]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Package Windows (${{ matrix.cpu-baseline }})
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cpu-baseline: generic
+            artifact: lanczos-scale-windows-x86_64
+            note: Portable x86_64 build for the broadest Windows compatibility.
+          - cpu-baseline: x86-64-v3
+            artifact: lanczos-scale-windows-x86_64-v3
+            note: Optimized x86_64-v3 build requiring AVX2/FMA/BMI-class CPUs.
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Keep Git checkouts MSYS2-friendly
+        shell: pwsh
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v6
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            git
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-meson
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-gimp
+
+      - name: Configure
+        run: >
+          meson setup build-release
+          -Dplugin=enabled
+          -Dcpu-baseline=${{ matrix.cpu-baseline }}
+          --buildtype=release
+          -Db_lto=true
+
+      - name: Build
+        run: meson compile -C build-release
+
+      - name: Test
+        run: meson test -C build-release --print-errorlogs
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $package = "dist/${{ matrix.artifact }}"
+          New-Item -ItemType Directory -Force -Path "$package/lanczos-scale" | Out-Null
+          Copy-Item -LiteralPath "build-release/lanczos-scale.exe" -Destination "$package/lanczos-scale/lanczos-scale.exe" -Force
+          Copy-Item -LiteralPath "README.md" -Destination "$package/README.md" -Force
+          Copy-Item -LiteralPath "LICENSE" -Destination "$package/LICENSE" -Force
+          $baselineInfo = @"
+          CPU baseline: ${{ matrix.cpu-baseline }}
+          ${{ matrix.note }}
+
+          Install by copying the lanczos-scale directory into the GIMP 3 plug-ins directory.
+          The directory basename and executable basename must both be lanczos-scale.
+          "@
+          Set-Content -LiteralPath "$package/CPU-BASELINE.txt" -Value $baselineInfo -Encoding UTF8
+          Compress-Archive -Path "$package/*" -DestinationPath "dist/${{ matrix.artifact }}.zip" -Force
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.zip
+
+  publish:
+    name: Publish GitHub release
+    needs: windows
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: lanczos-scale-windows-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber

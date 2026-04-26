@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 option(
   'plugindir',
   type: 'string',
@@ -10,4 +12,20 @@ option(
   type: 'feature',
   value: 'auto',
   description: 'Build the GIMP plug-in when gimpui-3.0 and gegl-0.4 development files are available.',
+)
+
+option(
+  'cpu-baseline',
+  type: 'combo',
+  choices: [
+    'generic',
+    'x86-64-v2',
+    'x86-64-v3',
+    'x86-64-v4',
+    'armv8-a',
+    'armv8.2-a',
+    'native',
+  ],
+  value: 'generic',
+  description: 'Minimum CPU ISA to target. Release builds should provide generic and optimized artifacts separately.',
 )

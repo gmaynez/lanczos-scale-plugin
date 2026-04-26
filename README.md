@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
 # Lanczos Scale
 
 `Lanczos Scale` is an external GIMP 3 plug-in that scales the selected layer drawable in place with a custom separable Lanczos resampler.
@@ -42,6 +44,39 @@ To run only the standalone resampler tests on a machine without GIMP development
 meson setup build -Dplugin=disabled
 meson test -C build
 ```
+
+## Performance Builds
+
+The default build is portable. Release builds can opt into a minimum CPU baseline:
+
+```sh
+meson setup build-v3 -Dcpu-baseline=x86-64-v3 --buildtype=release -Db_lto=true
+meson compile -C build-v3
+```
+
+Supported `cpu-baseline` values are:
+
+- `generic`: no extra ISA requirement; use this for the broadest compatibility.
+- `x86-64-v2`, `x86-64-v3`, `x86-64-v4`: x86_64 feature levels. `x86-64-v3` enables AVX/AVX2/FMA/BMI-class code generation on GCC/Clang-family compilers.
+- `armv8-a`, `armv8.2-a`: AArch64 baselines for ARM builds. AArch64 already includes SIMD/NEON as a baseline feature.
+- `native`: local-machine tuning only; do not use this for public release artifacts.
+
+For public releases, publish `generic` and optimized artifacts separately. A binary built with `x86-64-v3` will not run on older x86_64 CPUs.
+
+## GitHub Actions
+
+The CI workflow builds and tests the standalone resampler on Linux, macOS, Windows, x86_64, and ARM64 runner families, and builds the full GIMP plug-in on Windows/MSYS2 CLANG64.
+
+Tagging a release with a semver-style version tag such as `v1.2.3` runs the release workflow. It publishes Windows x86_64 plug-in zips for:
+
+- `lanczos-scale-windows-x86_64.zip`: portable generic build.
+- `lanczos-scale-windows-x86_64-v3.zip`: optimized x86-64-v3 build.
+
+Linux and macOS CI coverage is source/build validation for now. Public plug-in binaries for those platforms should wait until there is a stable, reproducible GIMP 3 SDK/runtime packaging path for each target.
+
+## License
+
+Lanczos Scale is licensed under the GNU General Public License version 3 or later (`GPL-3.0-or-later`). See `LICENSE`.
 
 Install with GIMP's tool when available:
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef GIMP_IO_H
 #define GIMP_IO_H
 
