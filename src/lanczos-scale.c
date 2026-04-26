@@ -536,6 +536,12 @@ make_reset_button_plain (GtkWidget *dialog)
 }
 
 static void
+center_dialog_on_parent (GtkWidget *dialog)
+{
+  gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER_ON_PARENT);
+}
+
+static void
 reset_dialog_defaults (const DialogDefaults *defaults)
 {
   g_object_set (defaults->config,
@@ -614,6 +620,7 @@ run_dialog (GimpProcedure       *procedure,
   dialog = gimp_procedure_dialog_new (procedure,
                                       config,
                                       "Lanczos Scale");
+  center_dialog_on_parent (dialog);
   gimp_procedure_dialog_set_ok_label (GIMP_PROCEDURE_DIALOG (dialog),
                                       "_Scale");
   hide_saved_settings_box (dialog);
@@ -643,6 +650,15 @@ run_dialog (GimpProcedure       *procedure,
   g_free (defaults.kernel);
 
   return run;
+}
+
+static void
+present_display_after_resize (GimpDisplay *display)
+{
+  gimp_displays_flush ();
+
+  if (display && gimp_display_is_valid (display))
+    gimp_display_present (display);
 }
 
 static gboolean
@@ -731,6 +747,7 @@ lanczos_scale_run (GimpProcedure        *procedure,
   GimpLayer          *visible_layer = NULL;
   GimpLayer          *output_layer = NULL;
   GimpImage          *output_image = NULL;
+  GimpDisplay        *output_display = NULL;
   GeglBuffer         *src_buffer = NULL;
   GeglBuffer         *dst_buffer = NULL;
   LanczosGimpFormat   format_info;
@@ -932,12 +949,15 @@ lanczos_scale_run (GimpProcedure        *procedure,
       gimp_image_undo_enable (output_image);
 
       if (run_mode != GIMP_RUN_NONINTERACTIVE)
-        gimp_display_new (output_image);
+        output_display = gimp_display_new (output_image);
     }
   else if (run_mode != GIMP_RUN_NONINTERACTIVE)
     {
-      gimp_displays_flush ();
+      output_display = gimp_default_display ();
     }
+
+  if (run_mode != GIMP_RUN_NONINTERACTIVE)
+    present_display_after_resize (output_display);
 
   gimp_progress_end ();
 
