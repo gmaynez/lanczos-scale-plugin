@@ -15,7 +15,7 @@ This repository contains `Lanczos Scale`, an external GIMP 3 plug-in written in 
 - Image menu interactive output: scale the image canvas, layers, layer masks, channels, and selection to the requested size.
 - Layer menu interactive output: replace selected layer and mask only; preserve the layer center relative to the canvas, and leave the image canvas and other layers unchanged.
 - PDB output modes: new layer, replace, or new image. Image replace mode scales the current image and requires the visible-image target; layer replace mode requires one selected layer.
-- Resampling: custom separable windowed-sinc filters with premultiplied-alpha filtering.
+- Resampling: custom separable windowed-sinc filters plus an experimental EWA Jinc path with premultiplied-alpha filtering.
 - Default quality path: linear-light float GEGL formats while preserving the drawable color space.
 
 ## Layout
@@ -125,7 +125,7 @@ Current dialog text intentionally follows GIMP's Scale Image style:
 - Fields: `_Width`, `_Height`
 - Section: `Quality`
 - Kernel label: `Interpolation`
-- Choices: `Lanczos 3`, `Lanczos 2`, `Kaiser-Sinc 3`, `Kaiser-Sinc 4` in a combo box
+- Choices: `Lanczos 3`, `Lanczos 2`, `Kaiser-Sinc 3`, `Kaiser-Sinc 4`, `EWA Jinc` in a combo box
 - OK button: `_Scale`
 - Bottom buttons: `_Help`, `_Reset`, `_Scale`, `_Cancel`; no saved-settings buttons.
 

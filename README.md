@@ -2,14 +2,14 @@
 
 # Lanczos Scale
 
-`Lanczos Scale` is an external GIMP 3 plug-in that scales image canvases and layer drawables with custom separable windowed-sinc resamplers.
+`Lanczos Scale` is an external GIMP 3 plug-in that scales image canvases and layer drawables with custom windowed-sinc and EWA resamplers.
 
 ## Features
 
 - Registers `plug-in-lanczos-scale` at `Image > Lanczos Scale...`.
 - Registers `plug-in-lanczos-scale-layer` at `Layer > Lanczos Scale...`.
 - Supports RGB/RGBA and grayscale/gray-alpha drawables.
-- Offers Lanczos3, Lanczos2, and experimental Kaiser-windowed sinc kernels.
+- Offers Lanczos3, Lanczos2, experimental Kaiser-windowed sinc kernels, and an experimental EWA Jinc filter.
 - Defaults to linear-light float processing while preserving the drawable color space.
 - Handles alpha by premultiplying before filtering and unpremultiplying after filtering.
 - The Image menu operation scales the image canvas, layers, layer masks, channels, and selection to the requested size.
@@ -129,4 +129,4 @@ The resampler uses the standard destination-center mapping:
 src = (dst + 0.5) * src_size / dst_size - 0.5
 ```
 
-For downscaling, the support is widened by the inverse scale and the selected windowed-sinc kernel is evaluated at `distance * scale` before normalization. Pixel reads are row-streamed through GEGL with a small horizontal row cache instead of allocating a full intermediate image.
+For separable filters, downscaling widens the support by the inverse scale and evaluates the selected windowed-sinc kernel at `distance * scale` before normalization. The experimental EWA Jinc filter evaluates a 2D elliptical footprint directly. Pixel reads are row-streamed through GEGL with a small row cache instead of allocating a full intermediate image.

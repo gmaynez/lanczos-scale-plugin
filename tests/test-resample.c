@@ -183,6 +183,64 @@ test_kaiser4_constant_rgba_downscale (void)
 }
 
 static void
+test_ewa_jinc_constant_rgba_downscale (void)
+{
+  float src[10 * 8 * 4];
+  float dst[4 * 3 * 4] = { 0.0f };
+  int   ok;
+
+  for (int i = 0; i < 10 * 8; i++)
+    {
+      src[i * 4 + 0] = 0.15f;
+      src[i * 4 + 1] = 0.35f;
+      src[i * 4 + 2] = 0.65f;
+      src[i * 4 + 3] = 0.45f;
+    }
+
+  ok = lanczos_resample_float (src, 10, 8, 4, 3,
+                               dst, 4, 3,
+                               LANCZOS_KERNEL_EWA_JINC,
+                               NULL, NULL);
+
+  expect_true ("ewa jinc constant rgba downscale ok", ok);
+
+  for (int i = 0; i < 4 * 3; i++)
+    {
+      expect_near ("ewa jinc constant red",   dst[i * 4 + 0], 0.15f, 1.0e-5f);
+      expect_near ("ewa jinc constant green", dst[i * 4 + 1], 0.35f, 1.0e-5f);
+      expect_near ("ewa jinc constant blue",  dst[i * 4 + 2], 0.65f, 1.0e-5f);
+      expect_near ("ewa jinc constant alpha", dst[i * 4 + 3], 0.45f, 1.0e-5f);
+    }
+}
+
+static void
+test_ewa_jinc_alpha_premultiply (void)
+{
+  const float src[] =
+  {
+    1.0f, 0.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 1.0f,
+  };
+  float dst[4 * 4] = { 0.0f };
+  int   ok;
+
+  ok = lanczos_resample_float (src, 2, 1, 4, 3,
+                               dst, 4, 1,
+                               LANCZOS_KERNEL_EWA_JINC,
+                               NULL, NULL);
+
+  expect_true ("ewa jinc alpha resample ok", ok);
+
+  for (int x = 0; x < 4; x++)
+    {
+      const float *px = dst + x * 4;
+
+      if (px[3] > 1.0e-4f)
+        expect_near ("ewa jinc transparent color did not bleed red", px[0], 0.0f, 1.0e-4f);
+    }
+}
+
+static void
 test_alpha_ringing_stays_bounded (void)
 {
   const float src[] =
@@ -228,6 +286,8 @@ main (void)
   test_alpha_premultiply ();
   test_constant_rgba_downscale ();
   test_kaiser4_constant_rgba_downscale ();
+  test_ewa_jinc_constant_rgba_downscale ();
+  test_ewa_jinc_alpha_premultiply ();
   test_alpha_ringing_stays_bounded ();
   test_invalid_kernel_rejected ();
 

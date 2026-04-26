@@ -2,6 +2,7 @@
 
 #include "gimp-io.h"
 
+#include <math.h>
 #include <string.h>
 
 typedef struct
@@ -29,6 +30,18 @@ mul_gsize_overflows (gsize  a,
 
   *result = a * b;
   return FALSE;
+}
+
+static gint
+clamp_gint (gint value,
+            gint low,
+            gint high)
+{
+  if (value < low)
+    return low;
+  if (value > high)
+    return high;
+  return value;
 }
 
 gboolean
@@ -162,6 +175,312 @@ load_horizontal_row (GeglBuffer                *src_buffer,
   slot->row = src_row;
 }
 
+static void
+load_source_row (GeglBuffer              *src_buffer,
+                 gint                     src_width,
+                 gint                     src_row,
+                 const LanczosGimpFormat *format_info,
+                 RowCacheSlot            *slot)
+{
+  gegl_buffer_get (src_buffer,
+                   GEGL_RECTANGLE (0, src_row, src_width, 1),
+                   1.0,
+                   format_info->format,
+                   slot->pixels,
+                   GEGL_AUTO_ROWSTRIDE,
+                   GEGL_ABYSS_NONE);
+
+  slot->row = src_row;
+}
+
+static const gfloat *
+get_source_row (GeglBuffer              *src_buffer,
+                gint                     src_width,
+                gint                     src_row,
+                const LanczosGimpFormat *format_info,
+                RowCacheSlot            *cache,
+                gint                     cache_size,
+                guint64                 *use_counter)
+{
+  RowCacheSlot *slot = find_cache_slot (cache, cache_size, src_row);
+
+  if (! slot)
+    {
+      slot = choose_cache_slot (cache, cache_size);
+      load_source_row (src_buffer, src_width, src_row, format_info, slot);
+    }
+
+  slot->used_at = (*use_counter)++;
+
+  return slot->pixels;
+}
+
+static void
+ewa_axis_bounds (gint     src_size,
+                 gint     dst_size,
+                 gint     dst_pos,
+                 gint     radius,
+                 gint    *raw_start,
+                 gint    *raw_end,
+                 gdouble *center,
+                 gdouble *filter_scale)
+{
+  gdouble scale = (gdouble) dst_size / (gdouble) src_size;
+  gdouble support = (gdouble) radius;
+
+  *center = (((gdouble) dst_pos + 0.5) *
+             (gdouble) src_size / (gdouble) dst_size) - 0.5;
+
+  if (scale < 1.0)
+    {
+      *filter_scale = scale;
+      support = (gdouble) radius / scale;
+    }
+  else
+    {
+      *filter_scale = 1.0;
+    }
+
+  *raw_start = (gint) ceil (*center - support);
+  *raw_end = (gint) floor (*center + support);
+
+  if (*raw_start > *raw_end)
+    *raw_start = *raw_end = clamp_gint ((gint) floor (*center + 0.5),
+                                        0, src_size - 1);
+}
+
+static gint
+ewa_axis_max_unique_taps (gint src_size,
+                          gint dst_size,
+                          gint radius)
+{
+  gdouble scale = (gdouble) dst_size / (gdouble) src_size;
+  gdouble support = scale < 1.0 ? (gdouble) radius / scale : (gdouble) radius;
+  gint    taps = (gint) ceil (support * 2.0) + 3;
+
+  return CLAMP (taps, 1, src_size);
+}
+
+static void
+ewa_accumulate_pixel (gdouble      *accum,
+                      const gfloat *src_pixel,
+                      gint          channels,
+                      gint          alpha_channel,
+                      gdouble       weight)
+{
+  if (alpha_channel >= 0)
+    {
+      gdouble alpha = src_pixel[alpha_channel];
+
+      for (gint c = 0; c < channels; c++)
+        {
+          gdouble value = src_pixel[c];
+
+          if (c != alpha_channel)
+            value *= alpha;
+
+          accum[c] += value * weight;
+        }
+    }
+  else
+    {
+      for (gint c = 0; c < channels; c++)
+        accum[c] += (gdouble) src_pixel[c] * weight;
+    }
+}
+
+static gboolean
+lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
+                           GeglBuffer               *dst_buffer,
+                           gint                      src_width,
+                           gint                      src_height,
+                           gint                      dst_width,
+                           gint                      dst_height,
+                           const LanczosGimpFormat  *format_info,
+                           LanczosKernel             kernel,
+                           LanczosGimpProgressFunc   progress,
+                           gpointer                  progress_data,
+                           GError                  **error)
+{
+  RowCacheSlot *cache = NULL;
+  gfloat       *dst_row = NULL;
+  gdouble      *accum = NULL;
+  gsize         src_row_values = 0;
+  gsize         dst_row_values = 0;
+  gsize         accum_bytes = 0;
+  gint          cache_size = 0;
+  gint          channels = format_info->channels;
+  gint          alpha_channel = format_info->alpha_channel;
+  gint          radius = lanczos_kernel_radius (kernel);
+  guint64       use_counter = 1;
+
+  if (mul_gsize_overflows ((gsize) src_width,
+                           (gsize) channels,
+                           &src_row_values) ||
+      mul_gsize_overflows ((gsize) dst_width,
+                           (gsize) channels,
+                           &dst_row_values) ||
+      mul_gsize_overflows ((gsize) channels,
+                           sizeof (*accum),
+                           &accum_bytes))
+    {
+      set_error (error, "Image dimensions are too large.");
+      goto fail;
+    }
+
+  cache_size = ewa_axis_max_unique_taps (src_height,
+                                         dst_height,
+                                         radius) + 2;
+  cache = g_try_new0 (RowCacheSlot, (gsize) cache_size);
+  dst_row = g_try_new (gfloat, dst_row_values);
+  accum = g_try_new (gdouble, (gsize) channels);
+
+  if (! cache || ! dst_row || ! accum)
+    {
+      set_error (error, "Could not allocate EWA row buffers.");
+      goto fail;
+    }
+
+  for (gint i = 0; i < cache_size; i++)
+    {
+      cache[i].row = -1;
+      cache[i].pixels = g_try_new (gfloat, src_row_values);
+      if (! cache[i].pixels)
+        {
+          set_error (error, "Could not allocate EWA row cache.");
+          goto fail;
+        }
+    }
+
+  for (gint dy = 0; dy < dst_height; dy++)
+    {
+      gdouble center_y;
+      gdouble filter_scale_y;
+      gint    raw_y_start;
+      gint    raw_y_end;
+
+      ewa_axis_bounds (src_height, dst_height, dy, radius,
+                       &raw_y_start, &raw_y_end,
+                       &center_y, &filter_scale_y);
+
+      for (gint dx_out = 0; dx_out < dst_width; dx_out++)
+        {
+          gfloat  *dst_pixel = dst_row + ((gsize) dx_out * (gsize) channels);
+          gdouble  center_x;
+          gdouble  filter_scale_x;
+          gdouble  weight_sum = 0.0;
+          gint     raw_x_start;
+          gint     raw_x_end;
+
+          ewa_axis_bounds (src_width, dst_width, dx_out, radius,
+                           &raw_x_start, &raw_x_end,
+                           &center_x, &filter_scale_x);
+
+          memset (accum, 0, accum_bytes);
+
+          for (gint sy = raw_y_start; sy <= raw_y_end; sy++)
+            {
+              gint          src_y = clamp_gint (sy, 0, src_height - 1);
+              gdouble       dist_y = (center_y - (gdouble) sy) * filter_scale_y;
+              const gfloat *src_row;
+
+              src_row = get_source_row (src_buffer,
+                                        src_width,
+                                        src_y,
+                                        format_info,
+                                        cache,
+                                        cache_size,
+                                        &use_counter);
+
+              for (gint sx = raw_x_start; sx <= raw_x_end; sx++)
+                {
+                  gint          src_x = clamp_gint (sx, 0, src_width - 1);
+                  gdouble       dist_x = (center_x - (gdouble) sx) * filter_scale_x;
+                  gdouble       r = sqrt ((dist_x * dist_x) + (dist_y * dist_y));
+                  gdouble       weight = lanczos_kernel_value (r, kernel);
+                  const gfloat *src_pixel;
+
+                  if (weight == 0.0)
+                    continue;
+
+                  src_pixel = src_row + ((gsize) src_x * (gsize) channels);
+
+                  ewa_accumulate_pixel (accum,
+                                        src_pixel,
+                                        channels,
+                                        alpha_channel,
+                                        weight);
+                  weight_sum += weight;
+                }
+            }
+
+          if (fabs (weight_sum) <= 1.0e-12)
+            {
+              gint          src_x = clamp_gint ((gint) floor (center_x + 0.5),
+                                                0, src_width - 1);
+              gint          src_y = clamp_gint ((gint) floor (center_y + 0.5),
+                                                0, src_height - 1);
+              const gfloat *src_row;
+              const gfloat *src_pixel;
+
+              src_row = get_source_row (src_buffer,
+                                        src_width,
+                                        src_y,
+                                        format_info,
+                                        cache,
+                                        cache_size,
+                                        &use_counter);
+              src_pixel = src_row + ((gsize) src_x * (gsize) channels);
+
+              memset (accum, 0, accum_bytes);
+              ewa_accumulate_pixel (accum,
+                                    src_pixel,
+                                    channels,
+                                    alpha_channel,
+                                    1.0);
+            }
+          else
+            {
+              for (gint c = 0; c < channels; c++)
+                accum[c] /= weight_sum;
+            }
+
+          lanczos_resample_store_pixel (accum,
+                                        dst_pixel,
+                                        channels,
+                                        alpha_channel);
+        }
+
+      gegl_buffer_set (dst_buffer,
+                       GEGL_RECTANGLE (0, dy, dst_width, 1),
+                       0,
+                       format_info->format,
+                       dst_row,
+                       GEGL_AUTO_ROWSTRIDE);
+
+      if (progress)
+        progress ((gdouble) (dy + 1) / (gdouble) dst_height, progress_data);
+    }
+
+  if (progress)
+    progress (1.0, progress_data);
+
+  gegl_buffer_flush (dst_buffer);
+
+  row_cache_free (cache, cache_size);
+  g_free (dst_row);
+  g_free (accum);
+
+  return TRUE;
+
+fail:
+  row_cache_free (cache, cache_size);
+  g_free (dst_row);
+  g_free (accum);
+
+  return FALSE;
+}
+
 gboolean
 lanczos_gegl_resample (GeglBuffer               *src_buffer,
                        GeglBuffer               *dst_buffer,
@@ -199,7 +518,8 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
       dst_width <= 0 || dst_height <= 0 ||
       format_info->channels <= 0 || format_info->channels > 16 ||
       format_info->alpha_channel < -1 ||
-      format_info->alpha_channel >= format_info->channels)
+      format_info->alpha_channel >= format_info->channels ||
+      ! lanczos_kernel_is_valid (kernel))
     {
       set_error (error, "Invalid image dimensions or channel count.");
       return FALSE;
@@ -222,6 +542,19 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
 
       return TRUE;
     }
+
+  if (lanczos_kernel_is_ewa (kernel))
+    return lanczos_gegl_resample_ewa (src_buffer,
+                                      dst_buffer,
+                                      src_width,
+                                      src_height,
+                                      dst_width,
+                                      dst_height,
+                                      format_info,
+                                      kernel,
+                                      progress,
+                                      progress_data,
+                                      error);
 
   x_table = lanczos_contrib_table_new (src_width, dst_width, kernel);
   y_table = lanczos_contrib_table_new (src_height, dst_height, kernel);

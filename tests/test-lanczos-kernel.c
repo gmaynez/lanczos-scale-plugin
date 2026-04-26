@@ -82,21 +82,34 @@ main (void)
 
   expect_near ("sinc zero", lanczos_sinc (0.0), 1.0, 1.0e-12);
   expect_near ("sinc integer", lanczos_sinc (1.0), 0.0, 1.0e-12);
+  expect_near ("jinc zero", lanczos_jinc (0.0), 1.0, 1.0e-12);
+  expect_true ("jinc finite", isfinite (lanczos_jinc (1.0)));
   expect_near ("kernel center", lanczos_kernel_value (0.0, LANCZOS_KERNEL_3), 1.0, 1.0e-12);
   expect_near ("kernel cutoff", lanczos_kernel_value (3.0, LANCZOS_KERNEL_3), 0.0, 1.0e-12);
   expect_near ("kernel outside", lanczos_kernel_value (3.1, LANCZOS_KERNEL_3), 0.0, 1.0e-12);
   expect_near ("lanczos2 cutoff", lanczos_kernel_value (2.0, LANCZOS_KERNEL_2), 0.0, 1.0e-12);
   expect_true ("kaiser3 valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_KAISER_3));
   expect_true ("kaiser4 valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_KAISER_4));
+  expect_true ("ewa jinc valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_EWA_JINC));
   expect_true ("invalid kernel not valid", ! lanczos_kernel_is_valid ((LanczosKernel) 4));
+  expect_true ("lanczos3 separable", lanczos_kernel_is_separable (LANCZOS_KERNEL_3));
+  expect_true ("ewa jinc not separable", ! lanczos_kernel_is_separable (LANCZOS_KERNEL_EWA_JINC));
+  expect_true ("ewa jinc is ewa", lanczos_kernel_is_ewa (LANCZOS_KERNEL_EWA_JINC));
   expect_true ("kaiser3 radius", lanczos_kernel_radius (LANCZOS_KERNEL_KAISER_3) == 3);
   expect_true ("kaiser4 radius", lanczos_kernel_radius (LANCZOS_KERNEL_KAISER_4) == 4);
+  expect_true ("ewa jinc radius", lanczos_kernel_radius (LANCZOS_KERNEL_EWA_JINC) == 3);
   expect_near ("kaiser3 center", lanczos_kernel_value (0.0, LANCZOS_KERNEL_KAISER_3), 1.0, 1.0e-12);
   expect_near ("kaiser3 cutoff", lanczos_kernel_value (3.0, LANCZOS_KERNEL_KAISER_3), 0.0, 1.0e-12);
   expect_near ("kaiser4 cutoff", lanczos_kernel_value (4.0, LANCZOS_KERNEL_KAISER_4), 0.0, 1.0e-12);
+  expect_near ("ewa jinc center", lanczos_kernel_value (0.0, LANCZOS_KERNEL_EWA_JINC), 1.0, 1.0e-12);
+  expect_near ("ewa jinc cutoff", lanczos_kernel_value (3.0, LANCZOS_KERNEL_EWA_JINC), 0.0, 1.0e-12);
+  expect_near ("ewa jinc outside", lanczos_kernel_value (3.1, LANCZOS_KERNEL_EWA_JINC), 0.0, 1.0e-12);
   expect_true ("kaiser3 half finite positive",
                isfinite (lanczos_kernel_value (0.5, LANCZOS_KERNEL_KAISER_3)) &&
                lanczos_kernel_value (0.5, LANCZOS_KERNEL_KAISER_3) > 0.0);
+  expect_true ("ewa jinc half finite positive",
+               isfinite (lanczos_kernel_value (0.5, LANCZOS_KERNEL_EWA_JINC)) &&
+               lanczos_kernel_value (0.5, LANCZOS_KERNEL_EWA_JINC) > 0.0);
 
   table = lanczos_contrib_table_new (7, 11, LANCZOS_KERNEL_3);
   expect_true ("table allocated", table != NULL);
@@ -142,6 +155,8 @@ main (void)
                lanczos_contrib_table_new (0, 1, LANCZOS_KERNEL_3) == NULL);
   expect_true ("bad kernel rejected",
                lanczos_contrib_table_new (4, 4, (LanczosKernel) 4) == NULL);
+  expect_true ("ewa jinc contribution table rejected",
+               lanczos_contrib_table_new (4, 4, LANCZOS_KERNEL_EWA_JINC) == NULL);
 
   return failures == 0 ? 0 : 1;
 }
