@@ -17,6 +17,8 @@
 #endif
 #endif
 
+#define LANCZOS_EWA_WEIGHT_LUT_SIZE 8192
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -48,6 +50,32 @@ typedef struct
   double              *weights;
 } LanczosContribTable;
 
+typedef struct
+{
+  int    raw_start;
+  int    raw_end;
+  double center;
+  double filter_scale;
+} LanczosEwaAxisItem;
+
+typedef struct
+{
+  int                 src_size;
+  int                 dst_size;
+  LanczosKernel       kernel;
+  int                 radius;
+  int                 max_taps;
+  LanczosEwaAxisItem *items;
+} LanczosEwaAxisTable;
+
+typedef struct
+{
+  LanczosKernel kernel;
+  int           size;
+  double        radius2;
+  double       *weights;
+} LanczosEwaWeightLut;
+
 typedef void (*LanczosProgressFunc) (double fraction,
                                      void  *data);
 
@@ -64,6 +92,17 @@ LanczosContribTable * lanczos_contrib_table_new       (int                    sr
                                                        int                    dst_size,
                                                        LanczosKernel          kernel);
 void                  lanczos_contrib_table_free      (LanczosContribTable   *table);
+
+LanczosEwaAxisTable * lanczos_ewa_axis_table_new      (int                    src_size,
+                                                       int                    dst_size,
+                                                       LanczosKernel          kernel);
+void                  lanczos_ewa_axis_table_free     (LanczosEwaAxisTable   *table);
+
+LanczosEwaWeightLut * lanczos_ewa_weight_lut_new      (LanczosKernel          kernel,
+                                                       int                    size);
+void                  lanczos_ewa_weight_lut_free     (LanczosEwaWeightLut   *lut);
+double                lanczos_ewa_weight_lut_lookup   (const LanczosEwaWeightLut *lut,
+                                                       double                 r2);
 
 void                  lanczos_resample_horizontal_row (const float           *LANCZOS_RESTRICT src_row,
                                                        float                 *LANCZOS_RESTRICT dst_row,

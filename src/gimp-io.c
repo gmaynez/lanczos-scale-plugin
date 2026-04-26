@@ -216,52 +216,6 @@ get_source_row (GeglBuffer              *src_buffer,
 }
 
 static void
-ewa_axis_bounds (gint     src_size,
-                 gint     dst_size,
-                 gint     dst_pos,
-                 gint     radius,
-                 gint    *raw_start,
-                 gint    *raw_end,
-                 gdouble *center,
-                 gdouble *filter_scale)
-{
-  gdouble scale = (gdouble) dst_size / (gdouble) src_size;
-  gdouble support = (gdouble) radius;
-
-  *center = (((gdouble) dst_pos + 0.5) *
-             (gdouble) src_size / (gdouble) dst_size) - 0.5;
-
-  if (scale < 1.0)
-    {
-      *filter_scale = scale;
-      support = (gdouble) radius / scale;
-    }
-  else
-    {
-      *filter_scale = 1.0;
-    }
-
-  *raw_start = (gint) ceil (*center - support);
-  *raw_end = (gint) floor (*center + support);
-
-  if (*raw_start > *raw_end)
-    *raw_start = *raw_end = clamp_gint ((gint) floor (*center + 0.5),
-                                        0, src_size - 1);
-}
-
-static gint
-ewa_axis_max_unique_taps (gint src_size,
-                          gint dst_size,
-                          gint radius)
-{
-  gdouble scale = (gdouble) dst_size / (gdouble) src_size;
-  gdouble support = scale < 1.0 ? (gdouble) radius / scale : (gdouble) radius;
-  gint    taps = (gint) ceil (support * 2.0) + 3;
-
-  return CLAMP (taps, 1, src_size);
-}
-
-static void
 ewa_accumulate_pixel (gdouble      *accum,
                       const gfloat *src_pixel,
                       gint          channels,
@@ -302,17 +256,19 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
                            gpointer                  progress_data,
                            GError                  **error)
 {
-  RowCacheSlot *cache = NULL;
-  gfloat       *dst_row = NULL;
-  gdouble      *accum = NULL;
-  gsize         src_row_values = 0;
-  gsize         dst_row_values = 0;
-  gsize         accum_bytes = 0;
-  gint          cache_size = 0;
-  gint          channels = format_info->channels;
-  gint          alpha_channel = format_info->alpha_channel;
-  gint          radius = lanczos_kernel_radius (kernel);
-  guint64       use_counter = 1;
+  LanczosEwaAxisTable *x_table = NULL;
+  LanczosEwaAxisTable *y_table = NULL;
+  LanczosEwaWeightLut *weight_lut = NULL;
+  RowCacheSlot        *cache = NULL;
+  gfloat              *dst_row = NULL;
+  gdouble             *accum = NULL;
+  gsize                src_row_values = 0;
+  gsize                dst_row_values = 0;
+  gsize                accum_bytes = 0;
+  gint                 cache_size = 0;
+  gint                 channels = format_info->channels;
+  gint                 alpha_channel = format_info->alpha_channel;
+  guint64              use_counter = 1;
 
   if (mul_gsize_overflows ((gsize) src_width,
                            (gsize) channels,
@@ -328,9 +284,17 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
       goto fail;
     }
 
-  cache_size = ewa_axis_max_unique_taps (src_height,
-                                         dst_height,
-                                         radius) + 2;
+  x_table = lanczos_ewa_axis_table_new (src_width, dst_width, kernel);
+  y_table = lanczos_ewa_axis_table_new (src_height, dst_height, kernel);
+  weight_lut = lanczos_ewa_weight_lut_new (kernel,
+                                           LANCZOS_EWA_WEIGHT_LUT_SIZE);
+  if (! x_table || ! y_table || ! weight_lut)
+    {
+      set_error (error, "Could not allocate EWA filter tables.");
+      goto fail;
+    }
+
+  cache_size = y_table->max_taps + 2;
   cache = g_try_new0 (RowCacheSlot, (gsize) cache_size);
   dst_row = g_try_new (gfloat, dst_row_values);
   accum = g_try_new (gdouble, (gsize) channels);
@@ -354,34 +318,24 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
 
   for (gint dy = 0; dy < dst_height; dy++)
     {
-      gdouble center_y;
-      gdouble filter_scale_y;
-      gint    raw_y_start;
-      gint    raw_y_end;
-
-      ewa_axis_bounds (src_height, dst_height, dy, radius,
-                       &raw_y_start, &raw_y_end,
-                       &center_y, &filter_scale_y);
+      const LanczosEwaAxisItem *y_axis = &y_table->items[dy];
 
       for (gint dx_out = 0; dx_out < dst_width; dx_out++)
         {
-          gfloat  *dst_pixel = dst_row + ((gsize) dx_out * (gsize) channels);
-          gdouble  center_x;
-          gdouble  filter_scale_x;
-          gdouble  weight_sum = 0.0;
-          gint     raw_x_start;
-          gint     raw_x_end;
-
-          ewa_axis_bounds (src_width, dst_width, dx_out, radius,
-                           &raw_x_start, &raw_x_end,
-                           &center_x, &filter_scale_x);
+          const LanczosEwaAxisItem *x_axis = &x_table->items[dx_out];
+          gfloat                   *dst_pixel = dst_row +
+                                                ((gsize) dx_out *
+                                                 (gsize) channels);
+          gdouble                   weight_sum = 0.0;
 
           memset (accum, 0, accum_bytes);
 
-          for (gint sy = raw_y_start; sy <= raw_y_end; sy++)
+          for (gint sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
             {
               gint          src_y = clamp_gint (sy, 0, src_height - 1);
-              gdouble       dist_y = (center_y - (gdouble) sy) * filter_scale_y;
+              gdouble       dist_y = (y_axis->center - (gdouble) sy) *
+                                     y_axis->filter_scale;
+              gdouble       dist_y2 = dist_y * dist_y;
               const gfloat *src_row;
 
               src_row = get_source_row (src_buffer,
@@ -392,12 +346,13 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
                                         cache_size,
                                         &use_counter);
 
-              for (gint sx = raw_x_start; sx <= raw_x_end; sx++)
+              for (gint sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
                 {
                   gint          src_x = clamp_gint (sx, 0, src_width - 1);
-                  gdouble       dist_x = (center_x - (gdouble) sx) * filter_scale_x;
-                  gdouble       r = sqrt ((dist_x * dist_x) + (dist_y * dist_y));
-                  gdouble       weight = lanczos_kernel_value (r, kernel);
+                  gdouble       dist_x = (x_axis->center - (gdouble) sx) *
+                                         x_axis->filter_scale;
+                  gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                                        (dist_x * dist_x) + dist_y2);
                   const gfloat *src_pixel;
 
                   if (weight == 0.0)
@@ -416,9 +371,9 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
 
           if (fabs (weight_sum) <= 1.0e-12)
             {
-              gint          src_x = clamp_gint ((gint) floor (center_x + 0.5),
+              gint          src_x = clamp_gint ((gint) floor (x_axis->center + 0.5),
                                                 0, src_width - 1);
-              gint          src_y = clamp_gint ((gint) floor (center_y + 0.5),
+              gint          src_y = clamp_gint ((gint) floor (y_axis->center + 0.5),
                                                 0, src_height - 1);
               const gfloat *src_row;
               const gfloat *src_pixel;
@@ -470,6 +425,9 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
   row_cache_free (cache, cache_size);
   g_free (dst_row);
   g_free (accum);
+  lanczos_ewa_axis_table_free (x_table);
+  lanczos_ewa_axis_table_free (y_table);
+  lanczos_ewa_weight_lut_free (weight_lut);
 
   return TRUE;
 
@@ -477,6 +435,9 @@ fail:
   row_cache_free (cache, cache_size);
   g_free (dst_row);
   g_free (accum);
+  lanczos_ewa_axis_table_free (x_table);
+  lanczos_ewa_axis_table_free (y_table);
+  lanczos_ewa_weight_lut_free (weight_lut);
 
   return FALSE;
 }

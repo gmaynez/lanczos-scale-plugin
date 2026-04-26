@@ -79,6 +79,8 @@ int
 main (void)
 {
   LanczosContribTable *table;
+  LanczosEwaAxisTable *axis_table;
+  LanczosEwaWeightLut *weight_lut;
 
   expect_near ("sinc zero", lanczos_sinc (0.0), 1.0, 1.0e-12);
   expect_near ("sinc integer", lanczos_sinc (1.0), 0.0, 1.0e-12);
@@ -157,6 +159,48 @@ main (void)
                lanczos_contrib_table_new (4, 4, (LanczosKernel) 4) == NULL);
   expect_true ("ewa jinc contribution table rejected",
                lanczos_contrib_table_new (4, 4, LANCZOS_KERNEL_EWA_JINC) == NULL);
+
+  axis_table = lanczos_ewa_axis_table_new (100, 33, LANCZOS_KERNEL_EWA_JINC);
+  expect_true ("ewa axis table allocated", axis_table != NULL);
+  if (axis_table)
+    {
+      expect_true ("ewa axis table max taps positive", axis_table->max_taps > 0);
+      expect_true ("ewa axis first raw ordered",
+                   axis_table->items[0].raw_start <= axis_table->items[0].raw_end);
+      expect_true ("ewa axis center finite", isfinite (axis_table->items[0].center));
+      expect_true ("ewa axis filter scale positive",
+                   axis_table->items[0].filter_scale > 0.0);
+      lanczos_ewa_axis_table_free (axis_table);
+    }
+
+  expect_true ("non-ewa axis table rejected",
+               lanczos_ewa_axis_table_new (4, 4, LANCZOS_KERNEL_3) == NULL);
+
+  weight_lut = lanczos_ewa_weight_lut_new (LANCZOS_KERNEL_EWA_JINC,
+                                           LANCZOS_EWA_WEIGHT_LUT_SIZE);
+  expect_true ("ewa weight lut allocated", weight_lut != NULL);
+  if (weight_lut)
+    {
+      const double r = 0.75;
+
+      expect_near ("ewa lut center",
+                   lanczos_ewa_weight_lut_lookup (weight_lut, 0.0),
+                   lanczos_kernel_value (0.0, LANCZOS_KERNEL_EWA_JINC),
+                   1.0e-12);
+      expect_near ("ewa lut interpolates kernel",
+                   lanczos_ewa_weight_lut_lookup (weight_lut, r * r),
+                   lanczos_kernel_value (r, LANCZOS_KERNEL_EWA_JINC),
+                   1.0e-4);
+      expect_near ("ewa lut cutoff",
+                   lanczos_ewa_weight_lut_lookup (weight_lut, 9.0),
+                   0.0,
+                   1.0e-12);
+      lanczos_ewa_weight_lut_free (weight_lut);
+    }
+
+  expect_true ("non-ewa weight lut rejected",
+               lanczos_ewa_weight_lut_new (LANCZOS_KERNEL_3,
+                                           LANCZOS_EWA_WEIGHT_LUT_SIZE) == NULL);
 
   return failures == 0 ? 0 : 1;
 }
