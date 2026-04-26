@@ -2,13 +2,11 @@
 
 #include "gimp-io.h"
 
-#include <string.h>
-
 typedef struct
 {
-  int     row;
+  gint    row;
   guint64 used_at;
-  float  *pixels;
+  gfloat *pixels;
 } RowCacheSlot;
 
 static void
@@ -90,10 +88,10 @@ lanczos_gimp_format_for_drawable (GimpDrawable       *drawable,
 
 static RowCacheSlot *
 find_cache_slot (RowCacheSlot *cache,
-                 int           cache_size,
-                 int           row)
+                 gint          cache_size,
+                 gint          row)
 {
-  int i;
+  gint i;
 
   for (i = 0; i < cache_size; i++)
     {
@@ -106,10 +104,10 @@ find_cache_slot (RowCacheSlot *cache,
 
 static RowCacheSlot *
 choose_cache_slot (RowCacheSlot *cache,
-                   int           cache_size)
+                   gint          cache_size)
 {
   RowCacheSlot *slot = &cache[0];
-  int           i;
+  gint          i;
 
   for (i = 0; i < cache_size; i++)
     {
@@ -124,12 +122,25 @@ choose_cache_slot (RowCacheSlot *cache,
 }
 
 static void
+row_cache_free (RowCacheSlot *cache,
+                gint          cache_size)
+{
+  if (! cache)
+    return;
+
+  for (gint i = 0; i < cache_size; i++)
+    g_free (cache[i].pixels);
+
+  g_free (cache);
+}
+
+static void
 load_horizontal_row (GeglBuffer                *src_buffer,
                      gint                       src_width,
                      gint                       src_row,
                      const LanczosGimpFormat   *format_info,
                      const LanczosContribTable *x_table,
-                     float                     *src_pixels,
+                     gfloat                    *src_pixels,
                      RowCacheSlot              *slot)
 {
   gegl_buffer_get (src_buffer,
@@ -159,18 +170,18 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
                        const LanczosGimpFormat  *format_info,
                        LanczosKernel             kernel,
                        LanczosGimpProgressFunc   progress,
-                       void                     *progress_data,
+                       gpointer                  progress_data,
                        GError                  **error)
 {
   LanczosContribTable *x_table = NULL;
   LanczosContribTable *y_table = NULL;
-  RowCacheSlot        *cache = NULL;
-  float               *src_row = NULL;
-  float               *dst_row = NULL;
+  RowCacheSlot        *cache   = NULL;
+  gfloat              *src_row = NULL;
+  gfloat              *dst_row = NULL;
   gsize                src_row_values = 0;
   gsize                dst_row_values = 0;
-  int                  cache_size = 0;
-  int                  dy;
+  gint                 cache_size = 0;
+  gint                 dy;
   guint64              use_counter = 1;
 
   g_return_val_if_fail (src_buffer != NULL, FALSE);
@@ -223,8 +234,8 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
     }
 
   cache = g_try_new0 (RowCacheSlot, (gsize) cache_size);
-  src_row = g_try_new (float, src_row_values);
-  dst_row = g_try_new (float, dst_row_values);
+  src_row = g_try_new (gfloat, src_row_values);
+  dst_row = g_try_new (gfloat, dst_row_values);
 
   if (! cache || ! src_row || ! dst_row)
     {
@@ -232,10 +243,10 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
       goto fail;
     }
 
-  for (int i = 0; i < cache_size; i++)
+  for (gint i = 0; i < cache_size; i++)
     {
       cache[i].row = -1;
-      cache[i].pixels = g_try_new (float, dst_row_values);
+      cache[i].pixels = g_try_new (gfloat, dst_row_values);
       if (! cache[i].pixels)
         {
           set_error (error, "Could not allocate row cache.");
@@ -246,9 +257,9 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
   for (dy = 0; dy < dst_height; dy++)
     {
       const LanczosContribution *y_contrib = &y_table->items[dy];
-      int                        dx;
+      gint                       dx;
 
-      for (int i = 0; i < y_contrib->n; i++)
+      for (gint i = 0; i < y_contrib->n; i++)
         {
           RowCacheSlot *slot = find_cache_slot (cache, cache_size,
                                                 y_contrib->pixels[i]);
@@ -270,15 +281,13 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
 
       for (dx = 0; dx < dst_width; dx++)
         {
-          double accum[16];
+          gdouble accum[16] = { 0.0, };
 
-          memset (accum, 0, sizeof (accum));
-
-          for (int i = 0; i < y_contrib->n; i++)
+          for (gint i = 0; i < y_contrib->n; i++)
             {
               RowCacheSlot *slot = find_cache_slot (cache, cache_size,
                                                     y_contrib->pixels[i]);
-              const float  *pixel;
+              const gfloat *pixel;
 
               if (! slot)
                 {
@@ -289,8 +298,8 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
               pixel = slot->pixels + ((size_t) dx *
                                       (size_t) format_info->channels);
 
-              for (int c = 0; c < format_info->channels; c++)
-                accum[c] += (double) pixel[c] * y_contrib->weights[i];
+              for (gint c = 0; c < format_info->channels; c++)
+                accum[c] += (gdouble) pixel[c] * y_contrib->weights[i];
             }
 
           lanczos_resample_store_pixel (accum,
@@ -308,7 +317,7 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
                        GEGL_AUTO_ROWSTRIDE);
 
       if (progress)
-        progress ((double) (dy + 1) / (double) dst_height, progress_data);
+        progress ((gdouble) (dy + 1) / (gdouble) dst_height, progress_data);
     }
 
   if (progress)
@@ -316,12 +325,7 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
 
   gegl_buffer_flush (dst_buffer);
 
-  if (cache)
-    {
-      for (int i = 0; i < cache_size; i++)
-        g_free (cache[i].pixels);
-    }
-  g_free (cache);
+  row_cache_free (cache, cache_size);
   g_free (src_row);
   g_free (dst_row);
   lanczos_contrib_table_free (x_table);
@@ -330,12 +334,7 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
   return TRUE;
 
 fail:
-  if (cache)
-    {
-      for (int i = 0; i < cache_size; i++)
-        g_free (cache[i].pixels);
-    }
-  g_free (cache);
+  row_cache_free (cache, cache_size);
   g_free (src_row);
   g_free (dst_row);
   lanczos_contrib_table_free (x_table);

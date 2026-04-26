@@ -10,12 +10,12 @@
 typedef struct
 {
   const Babl *format;
-  int         channels;
-  int         alpha_channel;
+  gint        channels;
+  gint        alpha_channel;
 } LanczosGimpFormat;
 
-typedef void (*LanczosGimpProgressFunc) (double fraction,
-                                         void  *data);
+typedef void (*LanczosGimpProgressFunc) (gdouble  fraction,
+                                         gpointer data);
 
 gboolean lanczos_gimp_format_for_drawable (GimpDrawable             *drawable,
                                            gboolean                  linear_light,
@@ -31,7 +31,7 @@ gboolean lanczos_gegl_resample           (GeglBuffer               *src_buffer,
                                           const LanczosGimpFormat  *format_info,
                                           LanczosKernel             kernel,
                                           LanczosGimpProgressFunc   progress,
-                                          void                     *progress_data,
+                                          gpointer                  progress_data,
                                           GError                  **error);
 
 #endif

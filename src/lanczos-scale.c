@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <string.h>
-
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wignored-qualifiers"
@@ -95,31 +93,55 @@ lanczos_scale_class_init (LanczosScaleClass *klass)
 }
 
 static void
-lanczos_scale_init (LanczosScale *self)
+lanczos_scale_init (LanczosScale *self G_GNUC_UNUSED)
 {
-  (void) self;
 }
 
 static GList *
-lanczos_scale_query_procedures (GimpPlugIn *plug_in)
+lanczos_scale_query_procedures (GimpPlugIn *plug_in G_GNUC_UNUSED)
 {
-  (void) plug_in;
-
   return g_list_append (NULL, g_strdup (PLUG_IN_PROC));
 }
 
 static gboolean
-lanczos_scale_set_i18n (GimpPlugIn  *plug_in,
-                        const gchar *procedure_name,
-                        gchar      **gettext_domain,
-                        gchar      **catalog_dir)
+lanczos_scale_set_i18n (GimpPlugIn   *plug_in G_GNUC_UNUSED,
+                        const gchar  *procedure_name G_GNUC_UNUSED,
+                        gchar       **gettext_domain G_GNUC_UNUSED,
+                        gchar       **catalog_dir G_GNUC_UNUSED)
 {
-  (void) plug_in;
-  (void) procedure_name;
-  (void) gettext_domain;
-  (void) catalog_dir;
-
   return FALSE;
+}
+
+static GimpChoice *
+lanczos_scale_create_target_choice (void)
+{
+  return gimp_choice_new_with_values ("selected-drawable", TARGET_SELECTED_DRAWABLE,
+                                      "Selected drawable", NULL,
+                                      "visible-image", TARGET_VISIBLE_IMAGE,
+                                      "Visible image", NULL,
+                                      NULL);
+}
+
+static GimpChoice *
+lanczos_scale_create_kernel_choice (void)
+{
+  return gimp_choice_new_with_values ("lanczos3", LANCZOS_KERNEL_3,
+                                      "Lanczos 3", NULL,
+                                      "lanczos2", LANCZOS_KERNEL_2,
+                                      "Lanczos 2", NULL,
+                                      NULL);
+}
+
+static GimpChoice *
+lanczos_scale_create_output_choice (void)
+{
+  return gimp_choice_new_with_values ("new-layer", OUTPUT_NEW_LAYER,
+                                      "New layer", NULL,
+                                      "replace-drawable", OUTPUT_REPLACE_DRAWABLE,
+                                      "Replace drawable", NULL,
+                                      "new-image", OUTPUT_NEW_IMAGE,
+                                      "New image", NULL,
+                                      NULL);
 }
 
 static GimpProcedure *
@@ -128,7 +150,7 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
 {
   GimpProcedure *procedure = NULL;
 
-  if (strcmp (name, PLUG_IN_PROC) == 0)
+  if (g_strcmp0 (name, PLUG_IN_PROC) == 0)
     {
       procedure = gimp_image_procedure_new (plug_in,
                                             name,
@@ -155,9 +177,7 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
       gimp_procedure_add_choice_argument (procedure, "target",
                                           "Source",
                                           "Pixels to scale",
-                                          gimp_choice_new_with_values ("selected-drawable", TARGET_SELECTED_DRAWABLE, "Selected drawable", NULL,
-                                                                       "visible-image",     TARGET_VISIBLE_IMAGE,     "Visible image",     NULL,
-                                                                       NULL),
+                                          lanczos_scale_create_target_choice (),
                                           "selected-drawable",
                                           G_PARAM_READWRITE);
 
@@ -182,19 +202,14 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
       gimp_procedure_add_choice_argument (procedure, "kernel",
                                           "Interpolation",
                                           "Lanczos kernel radius",
-                                          gimp_choice_new_with_values ("lanczos3", LANCZOS_KERNEL_3, "Lanczos 3", NULL,
-                                                                       "lanczos2", LANCZOS_KERNEL_2, "Lanczos 2", NULL,
-                                                                       NULL),
+                                          lanczos_scale_create_kernel_choice (),
                                           "lanczos3",
                                           G_PARAM_READWRITE);
 
       gimp_procedure_add_choice_argument (procedure, "output-mode",
                                           "Output",
                                           "Where to write the scaled result",
-                                          gimp_choice_new_with_values ("new-layer",        OUTPUT_NEW_LAYER,        "New layer",        NULL,
-                                                                       "replace-drawable", OUTPUT_REPLACE_DRAWABLE, "Replace drawable", NULL,
-                                                                       "new-image",        OUTPUT_NEW_IMAGE,        "New image",        NULL,
-                                                                       NULL),
+                                          lanczos_scale_create_output_choice (),
                                           "replace-drawable",
                                           G_PARAM_READWRITE);
 
@@ -280,7 +295,7 @@ copy_image_metadata (GimpImage *src,
   if (profile)
     {
       gimp_image_set_color_profile (dst, profile);
-      g_object_unref (profile);
+      g_clear_object (&profile);
     }
 
   if (gimp_image_get_resolution (src, &xres, &yres))
@@ -363,11 +378,9 @@ create_new_image_with_layer (GimpImage    *source_image,
 }
 
 static void
-progress_cb (double fraction,
-             void  *data)
+progress_cb (gdouble  fraction,
+             gpointer data G_GNUC_UNUSED)
 {
-  (void) data;
-
   gimp_progress_update (fraction);
 }
 
@@ -387,7 +400,7 @@ copy_source_buffer (GimpDrawable *drawable,
                     GEGL_ABYSS_NONE,
                     copy, GEGL_RECTANGLE (0, 0, width, height));
 
-  g_object_unref (src);
+  g_clear_object (&src);
 
   return copy;
 }
@@ -711,7 +724,7 @@ lanczos_scale_run (GimpProcedure        *procedure,
                    GimpImage            *image,
                    GimpDrawable        **drawables,
                    GimpProcedureConfig  *config,
-                   gpointer              run_data)
+                   gpointer              run_data G_GNUC_UNUSED)
 {
   GimpDrawable       *selected_drawable = NULL;
   GimpDrawable       *source_drawable = NULL;
@@ -733,8 +746,6 @@ lanczos_scale_run (GimpProcedure        *procedure,
   gint                dst_height;
   gboolean            undo_started = FALSE;
   GError             *error = NULL;
-
-  (void) run_data;
 
   gegl_init (NULL, NULL);
 
@@ -930,10 +941,8 @@ lanczos_scale_run (GimpProcedure        *procedure,
 
   gimp_progress_end ();
 
-  if (src_buffer)
-    g_object_unref (src_buffer);
-  if (dst_buffer)
-    g_object_unref (dst_buffer);
+  g_clear_object (&src_buffer);
+  g_clear_object (&dst_buffer);
 
   if (visible_layer)
     gimp_item_delete (GIMP_ITEM (visible_layer));
@@ -950,10 +959,8 @@ execution_error:
   if (undo_started)
     gimp_image_undo_group_end (image);
 
-  if (src_buffer)
-    g_object_unref (src_buffer);
-  if (dst_buffer)
-    g_object_unref (dst_buffer);
+  g_clear_object (&src_buffer);
+  g_clear_object (&dst_buffer);
 
   delete_failed_output (output_mode, output_image, output_layer);
 
