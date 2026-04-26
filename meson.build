@@ -3,7 +3,7 @@
 project(
   'lanczos-scale',
   'c',
-  version: '1.4.0',
+  version: '1.4.1',
   license: 'GPL-3.0-or-later',
   default_options: [
     'c_std=c11',

@@ -12,6 +12,10 @@
 
 #include "gimp-io.h"
 
+#ifdef GDK_WINDOWING_WIN32
+#include <gdk/gdkwin32.h>
+#endif
+
 #define PLUG_IN_PROC_IMAGE "plug-in-lanczos-scale"
 #define PLUG_IN_PROC_LAYER "plug-in-lanczos-scale-layer"
 #define PLUG_IN_BINARY     "lanczos-scale"
@@ -1165,6 +1169,52 @@ make_reset_button_plain (GtkWidget *dialog)
   gtk_widget_show (label);
 }
 
+static gboolean
+center_dialog_on_mapped (GtkWidget   *dialog,
+                         GdkEventAny *event G_GNUC_UNUSED,
+                         gpointer     data G_GNUC_UNUSED)
+{
+#ifdef GDK_WINDOWING_WIN32
+  if (GDK_IS_WIN32_DISPLAY (gdk_display_get_default ()))
+    {
+      GBytes *handle;
+      gsize   handle_size;
+      HWND    parent_hwnd;
+      HWND    dialog_hwnd;
+      RECT    parent_rect;
+      RECT    dialog_rect;
+      gint    x, y;
+
+      handle = gimp_progress_get_window_handle ();
+      if (! handle)
+        return FALSE;
+
+      parent_hwnd = *(HWND *) g_bytes_get_data (handle, &handle_size);
+      g_bytes_unref (handle);
+
+      if (! parent_hwnd || ! IsWindow (parent_hwnd))
+        return FALSE;
+
+      dialog_hwnd = (HWND) gdk_win32_window_get_handle (gtk_widget_get_window (dialog));
+      if (! dialog_hwnd)
+        return FALSE;
+
+      GetWindowRect (parent_hwnd, &parent_rect);
+      GetWindowRect (dialog_hwnd, &dialog_rect);
+
+      x = ((parent_rect.left + parent_rect.right) -
+           (dialog_rect.right - dialog_rect.left)) / 2;
+      y = ((parent_rect.top + parent_rect.bottom) -
+           (dialog_rect.bottom - dialog_rect.top)) / 2;
+
+      SetWindowPos (dialog_hwnd, HWND_TOP, x, y, 0, 0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+#endif
+
+  return FALSE;
+}
+
 static void
 center_dialog_on_parent (GtkWidget *dialog)
 {
@@ -1259,6 +1309,8 @@ run_dialog (GimpProcedure       *procedure,
   dialog = gimp_procedure_dialog_new (procedure,
                                       config,
                                       "Lanczos Scale");
+  g_signal_connect (dialog, "map-event",
+                    G_CALLBACK (center_dialog_on_mapped), NULL);
   center_dialog_on_parent (dialog);
   gimp_procedure_dialog_set_ok_label (GIMP_PROCEDURE_DIALOG (dialog),
                                       "_Scale");

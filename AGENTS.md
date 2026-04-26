@@ -22,13 +22,13 @@ This repository contains `Lanczos Scale`, an external GIMP 3 plug-in written in 
 
 - `src/lanczos-scale.c`: GIMP plug-in registration, dialog, validation, output modes, progress, and GIMP run callback.
 - `src/gimp-io.c`, `src/gimp-io.h`: GEGL/GIMP pixel format bridge and row-streamed buffer resampling.
-- `src/lanczos-resample.c`, `src/lanczos-resample.h`: standalone Lanczos kernel, contribution tables, and float-row resampling.
-- `tests/test-lanczos-kernel.c`: kernel and contribution-table tests.
+- `src/lanczos-resample.c`, `src/lanczos-resample.h`: standalone windowed-sinc/EWA kernels, contribution tables, EWA axis/weight lookup helpers, and float resampling.
+- `tests/test-lanczos-kernel.c`: kernel, contribution-table, and EWA table/lookup tests.
 - `tests/test-resample.c`: standalone resampler behavior tests.
 - `meson.build`, `meson_options.txt`: Meson build. The `plugin` feature can be enabled, disabled, or auto-detected.
 - `.github/workflows/ci.yml`: CI for standalone core tests across hosted OS/arch runners plus Windows/MSYS2 plug-in builds.
 - `.github/workflows/release.yml`: version-tag release packaging for Windows x86_64 generic and x86-64-v3 plug-in zips.
-- `README.md`: user-facing build/install notes.
+- `README.md`: user-facing build/install notes and interpolation guide.
 
 ## Known Local Environment
 
@@ -118,6 +118,8 @@ Select-String -Path "$env:APPDATA\GIMP\3.2\pluginrc" -Pattern 'plug-in-lanczos-s
 ## UI Notes
 
 The dialog uses `gimp_procedure_dialog_get_coordinates()` for a native GIMP size control. By default, that code path's chain button constrains width and height to the same value. `src/lanczos-scale.c` adds a small aspect-lock layer around the coordinate widget so the chain preserves the current source ratio instead.
+
+On Windows, the dialog also connects a `map-event` handler that uses `gimp_progress_get_window_handle()`, GDK Win32 window access, and `SetWindowPos()` to center the plug-in dialog over the active GIMP program window. Keep the existing GTK parent-centering call as the cross-platform fallback.
 
 Current dialog text intentionally follows GIMP's Scale Image style:
 

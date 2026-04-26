@@ -18,6 +18,16 @@
 
 Indexed drawables are intentionally out of scope for this first version.
 
+## Interpolation Guide
+
+There is no single best interpolation filter for every image. Use visual comparison for final work, especially around high-contrast edges, fine texture, line art, and alpha boundaries.
+
+- `Lanczos 3`: default sharp windowed-sinc filter. Good general-purpose choice for upscaling and moderate resizing, but it can show halos or ringing near strong edges.
+- `Lanczos 2`: smaller support than Lanczos 3. Useful when Lanczos 3 looks too sharp or ringy, with a slightly softer result and lower cost.
+- `Kaiser-Sinc 3`: Lanczos-like sharpness with a Kaiser window. A good first alternative to Lanczos 3 when you want a cleaner edge profile without giving up much crispness.
+- `Kaiser-Sinc 4`: wider, stronger Kaiser-windowed sinc. Best suited to photo downscaling, fine textures, diagonals, and moire-prone reductions where alias rejection matters more than maximum crispness.
+- `EWA Jinc`: experimental non-separable 2D filter with an elliptical footprint. Useful for comparing against the separable filters on diagonals, detailed textures, and non-uniform scaling; it is more computationally expensive than the separable filters.
+
 ## Build
 
 Requirements:
