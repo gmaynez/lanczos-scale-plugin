@@ -23,12 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - cpu-baseline: generic
-            artifact: lanczos-scale-windows-x86_64
-            note: Portable x86_64 build for the broadest Windows compatibility.
           - cpu-baseline: x86-64-v3
-            artifact: lanczos-scale-windows-x86_64-v3
-            note: Optimized x86_64-v3 build requiring AVX2/FMA/BMI-class CPUs.
+            artifact: lanczos-scale-windows-x86_64
+            note: Default Windows build for modern x86_64 CPUs with AVX2/FMA/BMI-class support.
+          - cpu-baseline: x86-64-v2
+            artifact: lanczos-scale-windows-x86_64-legacy
+            note: Legacy hardware compatibility build for older x86_64 CPUs without AVX2/FMA/BMI-class support.
 
     defaults:
       run:
@@ -75,11 +75,30 @@ jobs:
           Copy-Item -LiteralPath "build-release/lanczos-scale.exe" -Destination "$package/lanczos-scale/lanczos-scale.exe" -Force
           Copy-Item -LiteralPath "README.md" -Destination "$package/README.md" -Force
           Copy-Item -LiteralPath "LICENSE" -Destination "$package/LICENSE" -Force
+          $installInfo = @"
+          Windows installation
+          ====================
+
+          1. Close GIMP.
+          2. Open your GIMP 3 user plug-ins folder:
+             %APPDATA%\GIMP\3.2\plug-ins
+          3. Copy the lanczos-scale folder from this zip into that plug-ins folder.
+          4. Start GIMP and use Image > Lanczos Scale... or Layer > Lanczos Scale...
+
+          The installed path should look like:
+          %APPDATA%\GIMP\3.2\plug-ins\lanczos-scale\lanczos-scale.exe
+
+          The folder basename and executable basename must both be lanczos-scale.
+          Use lanczos-scale-windows-x86_64.zip by default. Use the legacy zip only for older CPUs that do not support the default build.
+          "@
+          Set-Content -LiteralPath "$package/INSTALL-WINDOWS.txt" -Value $installInfo -Encoding UTF8
           $baselineInfo = @"
           CPU baseline: ${{ matrix.cpu-baseline }}
           ${{ matrix.note }}
 
-          Install by copying the lanczos-scale directory into the GIMP 3 plug-ins directory.
+          Install by copying the lanczos-scale directory into the GIMP 3 plug-ins directory:
+          %APPDATA%\GIMP\3.2\plug-ins
+
           The directory basename and executable basename must both be lanczos-scale.
           "@
           Set-Content -LiteralPath "$package/CPU-BASELINE.txt" -Value $baselineInfo -Encoding UTF8
@@ -108,6 +127,24 @@ jobs:
         with:
           files: dist/*.zip
           generate_release_notes: true
+          body: |
+            ## Windows install
+
+            Download `lanczos-scale-windows-x86_64.zip` unless you need legacy hardware compatibility. Close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
+
+            ```text
+            %APPDATA%\GIMP\3.2\plug-ins
+            ```
+
+            The final path should be:
+
+            ```text
+            %APPDATA%\GIMP\3.2\plug-ins\lanczos-scale\lanczos-scale.exe
+            ```
+
+            Restart GIMP, then use `Image > Lanczos Scale...` or `Layer > Lanczos Scale...`.
+
+            Use `lanczos-scale-windows-x86_64-legacy.zip` only on older x86_64 CPUs that do not support the default x86-64-v3 build.
           draft: false
           prerelease: false
           tag_name: ${{ github.ref_name }}

@@ -49,21 +49,21 @@ meson test -C build
 
 ## Performance Builds
 
-The default build is portable. Release builds can opt into a minimum CPU baseline:
+The default build is portable when no CPU baseline is selected. Release builds can opt into a minimum CPU baseline:
 
 ```sh
-meson setup build-v3 -Dcpu-baseline=x86-64-v3 --buildtype=release -Db_lto=true
-meson compile -C build-v3
+meson setup build-release -Dcpu-baseline=x86-64-v3 --buildtype=release -Db_lto=true
+meson compile -C build-release
 ```
 
 Supported `cpu-baseline` values are:
 
-- `generic`: no extra ISA requirement; use this for the broadest compatibility.
+- `generic`: no extra ISA requirement; use this only when maximum compatibility is more important than release performance.
 - `x86-64-v2`, `x86-64-v3`, `x86-64-v4`: x86_64 feature levels. `x86-64-v3` enables AVX/AVX2/FMA/BMI-class code generation on GCC/Clang-family compilers.
 - `armv8-a`, `armv8.2-a`: AArch64 baselines for ARM builds. AArch64 already includes SIMD/NEON as a baseline feature.
 - `native`: local-machine tuning only; do not use this for public release artifacts.
 
-For public releases, publish `generic` and optimized artifacts separately. A binary built with `x86-64-v3` will not run on older x86_64 CPUs.
+For public Windows releases, `x86-64-v3` is the default build and `x86-64-v2` is the legacy hardware compatibility build. A binary built with `x86-64-v3` will not run on older x86_64 CPUs without AVX2/FMA/BMI-class support.
 
 ## GitHub Actions
 
@@ -71,8 +71,20 @@ The CI workflow builds and tests the standalone resampler on Linux, macOS, Windo
 
 Tagging a release with a version tag such as `v1.0` or `v1.2.3` runs the release workflow. It publishes Windows x86_64 plug-in zips for:
 
-- `lanczos-scale-windows-x86_64.zip`: portable generic build.
-- `lanczos-scale-windows-x86_64-v3.zip`: optimized x86-64-v3 build.
+- `lanczos-scale-windows-x86_64.zip`: default x86-64-v3 build for modern CPUs.
+- `lanczos-scale-windows-x86_64-legacy.zip`: legacy x86-64-v2 build for older CPUs.
+
+Each release zip includes `INSTALL-WINDOWS.txt`. To install, close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
+
+```text
+%APPDATA%\GIMP\3.2\plug-ins
+```
+
+The final installed path should be:
+
+```text
+%APPDATA%\GIMP\3.2\plug-ins\lanczos-scale\lanczos-scale.exe
+```
 
 Linux and macOS CI coverage is source/build validation for now. Public plug-in binaries for those platforms should wait until there is a stable, reproducible GIMP 3 SDK/runtime packaging path for each target.
 
