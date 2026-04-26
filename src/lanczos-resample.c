@@ -889,6 +889,373 @@ lanczos_ewa_accumulate_pixel (double      *LANCZOS_RESTRICT accum,
     }
 }
 
+typedef enum
+{
+  LANCZOS_EWA_LAYOUT_GENERIC,
+  LANCZOS_EWA_LAYOUT_Y,
+  LANCZOS_EWA_LAYOUT_YA,
+  LANCZOS_EWA_LAYOUT_RGB,
+  LANCZOS_EWA_LAYOUT_RGBA,
+} LanczosEwaLayout;
+
+static LanczosEwaLayout
+lanczos_ewa_layout_for_format (int channels,
+                               int alpha_channel)
+{
+  if (channels == 1 && alpha_channel < 0)
+    return LANCZOS_EWA_LAYOUT_Y;
+
+  if (channels == 2 && alpha_channel == 1)
+    return LANCZOS_EWA_LAYOUT_YA;
+
+  if (channels == 3 && alpha_channel < 0)
+    return LANCZOS_EWA_LAYOUT_RGB;
+
+  if (channels == 4 && alpha_channel == 3)
+    return LANCZOS_EWA_LAYOUT_RGBA;
+
+  return LANCZOS_EWA_LAYOUT_GENERIC;
+}
+
+static const float *
+lanczos_ewa_nearest_pixel (const float              *LANCZOS_RESTRICT src,
+                           int                       src_width,
+                           int                       src_height,
+                           int                       channels,
+                           const LanczosEwaAxisItem *LANCZOS_RESTRICT x_axis,
+                           const LanczosEwaAxisItem *LANCZOS_RESTRICT y_axis)
+{
+  int src_x = clamp_int ((int) floor (x_axis->center + 0.5),
+                         0, src_width - 1);
+  int src_y = clamp_int ((int) floor (y_axis->center + 0.5),
+                         0, src_height - 1);
+
+  return src + (((size_t) src_y * (size_t) src_width +
+                 (size_t) src_x) * (size_t) channels);
+}
+
+static void
+lanczos_resample_ewa_pixel_y (const float              *LANCZOS_RESTRICT src,
+                              int                       src_width,
+                              int                       src_height,
+                              const LanczosEwaAxisItem *LANCZOS_RESTRICT x_axis,
+                              const LanczosEwaAxisItem *LANCZOS_RESTRICT y_axis,
+                              const LanczosEwaWeightLut *LANCZOS_RESTRICT weight_lut,
+                              float                    *LANCZOS_RESTRICT dst_pixel)
+{
+  double y = 0.0;
+  double weight_sum = 0.0;
+
+  for (int sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      int          src_y = clamp_int (sy, 0, src_height - 1);
+      double       dy = (y_axis->center - (double) sy) *
+                        y_axis->filter_scale;
+      double       dy2 = dy * dy;
+      const float *src_row = src + ((size_t) src_y * (size_t) src_width);
+
+      for (int sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          int    src_x = clamp_int (sx, 0, src_width - 1);
+          double dx = (x_axis->center - (double) sx) *
+                      x_axis->filter_scale;
+          double weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                         (dx * dx) + dy2);
+
+          if (weight == 0.0)
+            continue;
+
+          y += (double) src_row[src_x] * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    dst_pixel[0] = lanczos_ewa_nearest_pixel (src, src_width, src_height, 1,
+                                              x_axis, y_axis)[0];
+  else
+    dst_pixel[0] = (float) (y / weight_sum);
+}
+
+static void
+lanczos_resample_ewa_pixel_ya (const float              *LANCZOS_RESTRICT src,
+                               int                       src_width,
+                               int                       src_height,
+                               const LanczosEwaAxisItem *LANCZOS_RESTRICT x_axis,
+                               const LanczosEwaAxisItem *LANCZOS_RESTRICT y_axis,
+                               const LanczosEwaWeightLut *LANCZOS_RESTRICT weight_lut,
+                               float                    *LANCZOS_RESTRICT dst_pixel)
+{
+  double y = 0.0;
+  double a = 0.0;
+  double weight_sum = 0.0;
+  double accum[2];
+
+  for (int sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      int          src_y = clamp_int (sy, 0, src_height - 1);
+      double       dy = (y_axis->center - (double) sy) *
+                        y_axis->filter_scale;
+      double       dy2 = dy * dy;
+      const float *src_row = src + ((size_t) src_y *
+                                    (size_t) src_width * 2u);
+
+      for (int sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          int          src_x = clamp_int (sx, 0, src_width - 1);
+          double       dx = (x_axis->center - (double) sx) *
+                            x_axis->filter_scale;
+          double       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                               (dx * dx) + dy2);
+          const float *src_pixel;
+          double       alpha;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src_row + ((size_t) src_x * 2u);
+          alpha = src_pixel[1];
+
+          y += (double) src_pixel[0] * alpha * weight;
+          a += alpha * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const float *src_pixel = lanczos_ewa_nearest_pixel (src,
+                                                          src_width,
+                                                          src_height,
+                                                          2,
+                                                          x_axis,
+                                                          y_axis);
+      double       alpha = src_pixel[1];
+
+      accum[0] = (double) src_pixel[0] * alpha;
+      accum[1] = alpha;
+    }
+  else
+    {
+      accum[0] = y / weight_sum;
+      accum[1] = a / weight_sum;
+    }
+
+  lanczos_resample_store_pixel (accum, dst_pixel, 2, 1);
+}
+
+static void
+lanczos_resample_ewa_pixel_rgb (const float              *LANCZOS_RESTRICT src,
+                                int                       src_width,
+                                int                       src_height,
+                                const LanczosEwaAxisItem *LANCZOS_RESTRICT x_axis,
+                                const LanczosEwaAxisItem *LANCZOS_RESTRICT y_axis,
+                                const LanczosEwaWeightLut *LANCZOS_RESTRICT weight_lut,
+                                float                    *LANCZOS_RESTRICT dst_pixel)
+{
+  double r = 0.0;
+  double g = 0.0;
+  double b = 0.0;
+  double weight_sum = 0.0;
+
+  for (int sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      int          src_y = clamp_int (sy, 0, src_height - 1);
+      double       dy = (y_axis->center - (double) sy) *
+                        y_axis->filter_scale;
+      double       dy2 = dy * dy;
+      const float *src_row = src + ((size_t) src_y *
+                                    (size_t) src_width * 3u);
+
+      for (int sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          int          src_x = clamp_int (sx, 0, src_width - 1);
+          double       dx = (x_axis->center - (double) sx) *
+                            x_axis->filter_scale;
+          double       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                               (dx * dx) + dy2);
+          const float *src_pixel;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src_row + ((size_t) src_x * 3u);
+
+          r += (double) src_pixel[0] * weight;
+          g += (double) src_pixel[1] * weight;
+          b += (double) src_pixel[2] * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const float *src_pixel = lanczos_ewa_nearest_pixel (src,
+                                                          src_width,
+                                                          src_height,
+                                                          3,
+                                                          x_axis,
+                                                          y_axis);
+
+      dst_pixel[0] = src_pixel[0];
+      dst_pixel[1] = src_pixel[1];
+      dst_pixel[2] = src_pixel[2];
+    }
+  else
+    {
+      dst_pixel[0] = (float) (r / weight_sum);
+      dst_pixel[1] = (float) (g / weight_sum);
+      dst_pixel[2] = (float) (b / weight_sum);
+    }
+}
+
+static void
+lanczos_resample_ewa_pixel_rgba (const float              *LANCZOS_RESTRICT src,
+                                 int                       src_width,
+                                 int                       src_height,
+                                 const LanczosEwaAxisItem *LANCZOS_RESTRICT x_axis,
+                                 const LanczosEwaAxisItem *LANCZOS_RESTRICT y_axis,
+                                 const LanczosEwaWeightLut *LANCZOS_RESTRICT weight_lut,
+                                 float                    *LANCZOS_RESTRICT dst_pixel)
+{
+  double r = 0.0;
+  double g = 0.0;
+  double b = 0.0;
+  double a = 0.0;
+  double weight_sum = 0.0;
+  double accum[4];
+
+  for (int sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      int          src_y = clamp_int (sy, 0, src_height - 1);
+      double       dy = (y_axis->center - (double) sy) *
+                        y_axis->filter_scale;
+      double       dy2 = dy * dy;
+      const float *src_row = src + ((size_t) src_y *
+                                    (size_t) src_width * 4u);
+
+      for (int sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          int          src_x = clamp_int (sx, 0, src_width - 1);
+          double       dx = (x_axis->center - (double) sx) *
+                            x_axis->filter_scale;
+          double       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                               (dx * dx) + dy2);
+          const float *src_pixel;
+          double       alpha;
+          double       premul_weight;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src_row + ((size_t) src_x * 4u);
+          alpha = src_pixel[3];
+          premul_weight = alpha * weight;
+
+          r += (double) src_pixel[0] * premul_weight;
+          g += (double) src_pixel[1] * premul_weight;
+          b += (double) src_pixel[2] * premul_weight;
+          a += alpha * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const float *src_pixel = lanczos_ewa_nearest_pixel (src,
+                                                          src_width,
+                                                          src_height,
+                                                          4,
+                                                          x_axis,
+                                                          y_axis);
+      double       alpha = src_pixel[3];
+
+      accum[0] = (double) src_pixel[0] * alpha;
+      accum[1] = (double) src_pixel[1] * alpha;
+      accum[2] = (double) src_pixel[2] * alpha;
+      accum[3] = alpha;
+    }
+  else
+    {
+      accum[0] = r / weight_sum;
+      accum[1] = g / weight_sum;
+      accum[2] = b / weight_sum;
+      accum[3] = a / weight_sum;
+    }
+
+  lanczos_resample_store_pixel (accum, dst_pixel, 4, 3);
+}
+
+static void
+lanczos_resample_ewa_pixel_generic (const float              *LANCZOS_RESTRICT src,
+                                    int                       src_width,
+                                    int                       src_height,
+                                    int                       channels,
+                                    int                       alpha_channel,
+                                    const LanczosEwaAxisItem *LANCZOS_RESTRICT x_axis,
+                                    const LanczosEwaAxisItem *LANCZOS_RESTRICT y_axis,
+                                    const LanczosEwaWeightLut *LANCZOS_RESTRICT weight_lut,
+                                    double                   *LANCZOS_RESTRICT accum,
+                                    size_t                    accum_bytes,
+                                    float                    *LANCZOS_RESTRICT dst_pixel)
+{
+  double weight_sum = 0.0;
+
+  memset (accum, 0, accum_bytes);
+
+  for (int sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      int    src_y = clamp_int (sy, 0, src_height - 1);
+      double dy = (y_axis->center - (double) sy) *
+                  y_axis->filter_scale;
+      double dy2 = dy * dy;
+
+      for (int sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          int          src_x = clamp_int (sx, 0, src_width - 1);
+          double       dx = (x_axis->center - (double) sx) *
+                            x_axis->filter_scale;
+          double       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                               (dx * dx) + dy2);
+          const float *src_pixel;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src +
+                      (((size_t) src_y * (size_t) src_width +
+                        (size_t) src_x) * (size_t) channels);
+
+          lanczos_ewa_accumulate_pixel (accum, src_pixel,
+                                        channels, alpha_channel,
+                                        weight);
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const float *src_pixel = lanczos_ewa_nearest_pixel (src,
+                                                          src_width,
+                                                          src_height,
+                                                          channels,
+                                                          x_axis,
+                                                          y_axis);
+
+      memset (accum, 0, accum_bytes);
+      lanczos_ewa_accumulate_pixel (accum, src_pixel,
+                                    channels, alpha_channel, 1.0);
+    }
+  else
+    {
+      for (int c = 0; c < channels; c++)
+        accum[c] /= weight_sum;
+    }
+
+  lanczos_resample_store_pixel (accum, dst_pixel,
+                                channels, alpha_channel);
+}
+
 static bool
 lanczos_resample_ewa_float (const float         *LANCZOS_RESTRICT src,
                             int                  src_width,
@@ -907,7 +1274,9 @@ lanczos_resample_ewa_float (const float         *LANCZOS_RESTRICT src,
   LanczosEwaWeightLut *weight_lut = NULL;
   double              *accum = NULL;
   size_t               accum_bytes;
+  LanczosEwaLayout     layout;
 
+  layout = lanczos_ewa_layout_for_format (channels, alpha_channel);
   if (mul_size_overflows ((size_t) channels, sizeof (*accum), &accum_bytes))
     return false;
 
@@ -937,62 +1306,41 @@ lanczos_resample_ewa_float (const float         *LANCZOS_RESTRICT src,
                                                   (size_t) dst_width +
                                                   (size_t) x) *
                                                  (size_t) channels);
-          double                    weight_sum = 0.0;
 
-          memset (accum, 0, accum_bytes);
-
-          for (int sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+          switch (layout)
             {
-              int    src_y = clamp_int (sy, 0, src_height - 1);
-              double dy = (y_axis->center - (double) sy) *
-                          y_axis->filter_scale;
-              double dy2 = dy * dy;
+            case LANCZOS_EWA_LAYOUT_Y:
+              lanczos_resample_ewa_pixel_y (src, src_width, src_height,
+                                            x_axis, y_axis, weight_lut,
+                                            dst_pixel);
+              break;
 
-              for (int sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
-                {
-                  int          src_x = clamp_int (sx, 0, src_width - 1);
-                  double       dx = (x_axis->center - (double) sx) *
-                                    x_axis->filter_scale;
-                  double       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
-                                                                       (dx * dx) + dy2);
-                  const float *src_pixel;
+            case LANCZOS_EWA_LAYOUT_YA:
+              lanczos_resample_ewa_pixel_ya (src, src_width, src_height,
+                                             x_axis, y_axis, weight_lut,
+                                             dst_pixel);
+              break;
 
-                  if (weight == 0.0)
-                    continue;
+            case LANCZOS_EWA_LAYOUT_RGB:
+              lanczos_resample_ewa_pixel_rgb (src, src_width, src_height,
+                                              x_axis, y_axis, weight_lut,
+                                              dst_pixel);
+              break;
 
-                  src_pixel = src +
-                              (((size_t) src_y * (size_t) src_width +
-                                (size_t) src_x) * (size_t) channels);
+            case LANCZOS_EWA_LAYOUT_RGBA:
+              lanczos_resample_ewa_pixel_rgba (src, src_width, src_height,
+                                               x_axis, y_axis, weight_lut,
+                                               dst_pixel);
+              break;
 
-                  lanczos_ewa_accumulate_pixel (accum, src_pixel,
-                                                channels, alpha_channel,
-                                                weight);
-                  weight_sum += weight;
-                }
+            case LANCZOS_EWA_LAYOUT_GENERIC:
+              lanczos_resample_ewa_pixel_generic (src, src_width, src_height,
+                                                  channels, alpha_channel,
+                                                  x_axis, y_axis, weight_lut,
+                                                  accum, accum_bytes,
+                                                  dst_pixel);
+              break;
             }
-
-          if (fabs (weight_sum) <= 1.0e-12)
-            {
-              int          src_x = clamp_int ((int) floor (x_axis->center + 0.5),
-                                              0, src_width - 1);
-              int          src_y = clamp_int ((int) floor (y_axis->center + 0.5),
-                                              0, src_height - 1);
-              const float *src_pixel = src +
-                                       (((size_t) src_y * (size_t) src_width +
-                                         (size_t) src_x) * (size_t) channels);
-
-              memset (accum, 0, accum_bytes);
-              lanczos_ewa_accumulate_pixel (accum, src_pixel,
-                                            channels, alpha_channel, 1.0);
-            }
-          else
-            {
-              for (int c = 0; c < channels; c++)
-                accum[c] /= weight_sum;
-            }
-
-          lanczos_resample_store_pixel (accum, dst_pixel,
-                                        channels, alpha_channel);
         }
 
       if (progress)

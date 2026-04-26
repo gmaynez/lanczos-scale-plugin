@@ -243,6 +243,447 @@ ewa_accumulate_pixel (gdouble      *accum,
     }
 }
 
+typedef enum
+{
+  EWA_LAYOUT_GENERIC,
+  EWA_LAYOUT_Y,
+  EWA_LAYOUT_YA,
+  EWA_LAYOUT_RGB,
+  EWA_LAYOUT_RGBA,
+} EwaLayout;
+
+static EwaLayout
+ewa_layout_for_format (gint channels,
+                       gint alpha_channel)
+{
+  if (channels == 1 && alpha_channel < 0)
+    return EWA_LAYOUT_Y;
+
+  if (channels == 2 && alpha_channel == 1)
+    return EWA_LAYOUT_YA;
+
+  if (channels == 3 && alpha_channel < 0)
+    return EWA_LAYOUT_RGB;
+
+  if (channels == 4 && alpha_channel == 3)
+    return EWA_LAYOUT_RGBA;
+
+  return EWA_LAYOUT_GENERIC;
+}
+
+static const gfloat *
+ewa_nearest_pixel (GeglBuffer              *src_buffer,
+                   gint                     src_width,
+                   gint                     src_height,
+                   const LanczosGimpFormat *format_info,
+                   RowCacheSlot            *cache,
+                   gint                     cache_size,
+                   guint64                 *use_counter,
+                   gint                     channels,
+                   const LanczosEwaAxisItem *x_axis,
+                   const LanczosEwaAxisItem *y_axis)
+{
+  gint          src_x = clamp_gint ((gint) floor (x_axis->center + 0.5),
+                                    0, src_width - 1);
+  gint          src_y = clamp_gint ((gint) floor (y_axis->center + 0.5),
+                                    0, src_height - 1);
+  const gfloat *src_row;
+
+  src_row = get_source_row (src_buffer,
+                            src_width,
+                            src_y,
+                            format_info,
+                            cache,
+                            cache_size,
+                            use_counter);
+
+  return src_row + ((gsize) src_x * (gsize) channels);
+}
+
+static void
+ewa_pixel_y (GeglBuffer               *src_buffer,
+             gint                      src_width,
+             gint                      src_height,
+             const LanczosGimpFormat  *format_info,
+             RowCacheSlot             *cache,
+             gint                      cache_size,
+             guint64                  *use_counter,
+             const LanczosEwaAxisItem *x_axis,
+             const LanczosEwaAxisItem *y_axis,
+             const LanczosEwaWeightLut *weight_lut,
+             gfloat                   *dst_pixel)
+{
+  gdouble y = 0.0;
+  gdouble weight_sum = 0.0;
+
+  for (gint sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      gint          src_y = clamp_gint (sy, 0, src_height - 1);
+      gdouble       dist_y = (y_axis->center - (gdouble) sy) *
+                             y_axis->filter_scale;
+      gdouble       dist_y2 = dist_y * dist_y;
+      const gfloat *src_row;
+
+      src_row = get_source_row (src_buffer,
+                                src_width,
+                                src_y,
+                                format_info,
+                                cache,
+                                cache_size,
+                                use_counter);
+
+      for (gint sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          gint    src_x = clamp_gint (sx, 0, src_width - 1);
+          gdouble dist_x = (x_axis->center - (gdouble) sx) *
+                           x_axis->filter_scale;
+          gdouble weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                          (dist_x * dist_x) + dist_y2);
+
+          if (weight == 0.0)
+            continue;
+
+          y += (gdouble) src_row[src_x] * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    dst_pixel[0] = ewa_nearest_pixel (src_buffer, src_width, src_height,
+                                      format_info, cache, cache_size,
+                                      use_counter, 1, x_axis, y_axis)[0];
+  else
+    dst_pixel[0] = (gfloat) (y / weight_sum);
+}
+
+static void
+ewa_pixel_ya (GeglBuffer               *src_buffer,
+              gint                      src_width,
+              gint                      src_height,
+              const LanczosGimpFormat  *format_info,
+              RowCacheSlot             *cache,
+              gint                      cache_size,
+              guint64                  *use_counter,
+              const LanczosEwaAxisItem *x_axis,
+              const LanczosEwaAxisItem *y_axis,
+              const LanczosEwaWeightLut *weight_lut,
+              gfloat                   *dst_pixel)
+{
+  gdouble y = 0.0;
+  gdouble a = 0.0;
+  gdouble weight_sum = 0.0;
+  gdouble accum[2];
+
+  for (gint sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      gint          src_y = clamp_gint (sy, 0, src_height - 1);
+      gdouble       dist_y = (y_axis->center - (gdouble) sy) *
+                             y_axis->filter_scale;
+      gdouble       dist_y2 = dist_y * dist_y;
+      const gfloat *src_row;
+
+      src_row = get_source_row (src_buffer,
+                                src_width,
+                                src_y,
+                                format_info,
+                                cache,
+                                cache_size,
+                                use_counter);
+
+      for (gint sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          gint          src_x = clamp_gint (sx, 0, src_width - 1);
+          gdouble       dist_x = (x_axis->center - (gdouble) sx) *
+                                 x_axis->filter_scale;
+          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                                (dist_x * dist_x) + dist_y2);
+          const gfloat *src_pixel;
+          gdouble       alpha;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src_row + ((gsize) src_x * 2u);
+          alpha = src_pixel[1];
+
+          y += (gdouble) src_pixel[0] * alpha * weight;
+          a += alpha * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const gfloat *src_pixel;
+      gdouble       alpha;
+
+      src_pixel = ewa_nearest_pixel (src_buffer, src_width, src_height,
+                                     format_info, cache, cache_size,
+                                     use_counter, 2, x_axis, y_axis);
+      alpha = src_pixel[1];
+
+      accum[0] = (gdouble) src_pixel[0] * alpha;
+      accum[1] = alpha;
+    }
+  else
+    {
+      accum[0] = y / weight_sum;
+      accum[1] = a / weight_sum;
+    }
+
+  lanczos_resample_store_pixel (accum, dst_pixel, 2, 1);
+}
+
+static void
+ewa_pixel_rgb (GeglBuffer               *src_buffer,
+               gint                      src_width,
+               gint                      src_height,
+               const LanczosGimpFormat  *format_info,
+               RowCacheSlot             *cache,
+               gint                      cache_size,
+               guint64                  *use_counter,
+               const LanczosEwaAxisItem *x_axis,
+               const LanczosEwaAxisItem *y_axis,
+               const LanczosEwaWeightLut *weight_lut,
+               gfloat                   *dst_pixel)
+{
+  gdouble r = 0.0;
+  gdouble g = 0.0;
+  gdouble b = 0.0;
+  gdouble weight_sum = 0.0;
+
+  for (gint sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      gint          src_y = clamp_gint (sy, 0, src_height - 1);
+      gdouble       dist_y = (y_axis->center - (gdouble) sy) *
+                             y_axis->filter_scale;
+      gdouble       dist_y2 = dist_y * dist_y;
+      const gfloat *src_row;
+
+      src_row = get_source_row (src_buffer,
+                                src_width,
+                                src_y,
+                                format_info,
+                                cache,
+                                cache_size,
+                                use_counter);
+
+      for (gint sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          gint          src_x = clamp_gint (sx, 0, src_width - 1);
+          gdouble       dist_x = (x_axis->center - (gdouble) sx) *
+                                 x_axis->filter_scale;
+          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                                (dist_x * dist_x) + dist_y2);
+          const gfloat *src_pixel;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src_row + ((gsize) src_x * 3u);
+
+          r += (gdouble) src_pixel[0] * weight;
+          g += (gdouble) src_pixel[1] * weight;
+          b += (gdouble) src_pixel[2] * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const gfloat *src_pixel;
+
+      src_pixel = ewa_nearest_pixel (src_buffer, src_width, src_height,
+                                     format_info, cache, cache_size,
+                                     use_counter, 3, x_axis, y_axis);
+
+      dst_pixel[0] = src_pixel[0];
+      dst_pixel[1] = src_pixel[1];
+      dst_pixel[2] = src_pixel[2];
+    }
+  else
+    {
+      dst_pixel[0] = (gfloat) (r / weight_sum);
+      dst_pixel[1] = (gfloat) (g / weight_sum);
+      dst_pixel[2] = (gfloat) (b / weight_sum);
+    }
+}
+
+static void
+ewa_pixel_rgba (GeglBuffer               *src_buffer,
+                gint                      src_width,
+                gint                      src_height,
+                const LanczosGimpFormat  *format_info,
+                RowCacheSlot             *cache,
+                gint                      cache_size,
+                guint64                  *use_counter,
+                const LanczosEwaAxisItem *x_axis,
+                const LanczosEwaAxisItem *y_axis,
+                const LanczosEwaWeightLut *weight_lut,
+                gfloat                   *dst_pixel)
+{
+  gdouble r = 0.0;
+  gdouble g = 0.0;
+  gdouble b = 0.0;
+  gdouble a = 0.0;
+  gdouble weight_sum = 0.0;
+  gdouble accum[4];
+
+  for (gint sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      gint          src_y = clamp_gint (sy, 0, src_height - 1);
+      gdouble       dist_y = (y_axis->center - (gdouble) sy) *
+                             y_axis->filter_scale;
+      gdouble       dist_y2 = dist_y * dist_y;
+      const gfloat *src_row;
+
+      src_row = get_source_row (src_buffer,
+                                src_width,
+                                src_y,
+                                format_info,
+                                cache,
+                                cache_size,
+                                use_counter);
+
+      for (gint sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          gint          src_x = clamp_gint (sx, 0, src_width - 1);
+          gdouble       dist_x = (x_axis->center - (gdouble) sx) *
+                                 x_axis->filter_scale;
+          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                                (dist_x * dist_x) + dist_y2);
+          const gfloat *src_pixel;
+          gdouble       alpha;
+          gdouble       premul_weight;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src_row + ((gsize) src_x * 4u);
+          alpha = src_pixel[3];
+          premul_weight = alpha * weight;
+
+          r += (gdouble) src_pixel[0] * premul_weight;
+          g += (gdouble) src_pixel[1] * premul_weight;
+          b += (gdouble) src_pixel[2] * premul_weight;
+          a += alpha * weight;
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const gfloat *src_pixel;
+      gdouble       alpha;
+
+      src_pixel = ewa_nearest_pixel (src_buffer, src_width, src_height,
+                                     format_info, cache, cache_size,
+                                     use_counter, 4, x_axis, y_axis);
+      alpha = src_pixel[3];
+
+      accum[0] = (gdouble) src_pixel[0] * alpha;
+      accum[1] = (gdouble) src_pixel[1] * alpha;
+      accum[2] = (gdouble) src_pixel[2] * alpha;
+      accum[3] = alpha;
+    }
+  else
+    {
+      accum[0] = r / weight_sum;
+      accum[1] = g / weight_sum;
+      accum[2] = b / weight_sum;
+      accum[3] = a / weight_sum;
+    }
+
+  lanczos_resample_store_pixel (accum, dst_pixel, 4, 3);
+}
+
+static void
+ewa_pixel_generic (GeglBuffer               *src_buffer,
+                   gint                      src_width,
+                   gint                      src_height,
+                   const LanczosGimpFormat  *format_info,
+                   RowCacheSlot             *cache,
+                   gint                      cache_size,
+                   guint64                  *use_counter,
+                   gint                      channels,
+                   gint                      alpha_channel,
+                   const LanczosEwaAxisItem *x_axis,
+                   const LanczosEwaAxisItem *y_axis,
+                   const LanczosEwaWeightLut *weight_lut,
+                   gdouble                  *accum,
+                   gsize                     accum_bytes,
+                   gfloat                   *dst_pixel)
+{
+  gdouble weight_sum = 0.0;
+
+  memset (accum, 0, accum_bytes);
+
+  for (gint sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+    {
+      gint          src_y = clamp_gint (sy, 0, src_height - 1);
+      gdouble       dist_y = (y_axis->center - (gdouble) sy) *
+                             y_axis->filter_scale;
+      gdouble       dist_y2 = dist_y * dist_y;
+      const gfloat *src_row;
+
+      src_row = get_source_row (src_buffer,
+                                src_width,
+                                src_y,
+                                format_info,
+                                cache,
+                                cache_size,
+                                use_counter);
+
+      for (gint sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
+        {
+          gint          src_x = clamp_gint (sx, 0, src_width - 1);
+          gdouble       dist_x = (x_axis->center - (gdouble) sx) *
+                                 x_axis->filter_scale;
+          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
+                                                                (dist_x * dist_x) + dist_y2);
+          const gfloat *src_pixel;
+
+          if (weight == 0.0)
+            continue;
+
+          src_pixel = src_row + ((gsize) src_x * (gsize) channels);
+
+          ewa_accumulate_pixel (accum,
+                                src_pixel,
+                                channels,
+                                alpha_channel,
+                                weight);
+          weight_sum += weight;
+        }
+    }
+
+  if (fabs (weight_sum) <= 1.0e-12)
+    {
+      const gfloat *src_pixel;
+
+      src_pixel = ewa_nearest_pixel (src_buffer, src_width, src_height,
+                                     format_info, cache, cache_size,
+                                     use_counter, channels, x_axis, y_axis);
+
+      memset (accum, 0, accum_bytes);
+      ewa_accumulate_pixel (accum,
+                            src_pixel,
+                            channels,
+                            alpha_channel,
+                            1.0);
+    }
+  else
+    {
+      for (gint c = 0; c < channels; c++)
+        accum[c] /= weight_sum;
+    }
+
+  lanczos_resample_store_pixel (accum,
+                                dst_pixel,
+                                channels,
+                                alpha_channel);
+}
+
 static gboolean
 lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
                            GeglBuffer               *dst_buffer,
@@ -268,7 +709,10 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
   gint                 cache_size = 0;
   gint                 channels = format_info->channels;
   gint                 alpha_channel = format_info->alpha_channel;
+  EwaLayout            layout;
   guint64              use_counter = 1;
+
+  layout = ewa_layout_for_format (channels, alpha_channel);
 
   if (mul_gsize_overflows ((gsize) src_width,
                            (gsize) channels,
@@ -326,84 +770,45 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
           gfloat                   *dst_pixel = dst_row +
                                                 ((gsize) dx_out *
                                                  (gsize) channels);
-          gdouble                   weight_sum = 0.0;
 
-          memset (accum, 0, accum_bytes);
-
-          for (gint sy = y_axis->raw_start; sy <= y_axis->raw_end; sy++)
+          switch (layout)
             {
-              gint          src_y = clamp_gint (sy, 0, src_height - 1);
-              gdouble       dist_y = (y_axis->center - (gdouble) sy) *
-                                     y_axis->filter_scale;
-              gdouble       dist_y2 = dist_y * dist_y;
-              const gfloat *src_row;
+            case EWA_LAYOUT_Y:
+              ewa_pixel_y (src_buffer, src_width, src_height,
+                           format_info, cache, cache_size,
+                           &use_counter, x_axis, y_axis,
+                           weight_lut, dst_pixel);
+              break;
 
-              src_row = get_source_row (src_buffer,
-                                        src_width,
-                                        src_y,
-                                        format_info,
-                                        cache,
-                                        cache_size,
-                                        &use_counter);
+            case EWA_LAYOUT_YA:
+              ewa_pixel_ya (src_buffer, src_width, src_height,
+                            format_info, cache, cache_size,
+                            &use_counter, x_axis, y_axis,
+                            weight_lut, dst_pixel);
+              break;
 
-              for (gint sx = x_axis->raw_start; sx <= x_axis->raw_end; sx++)
-                {
-                  gint          src_x = clamp_gint (sx, 0, src_width - 1);
-                  gdouble       dist_x = (x_axis->center - (gdouble) sx) *
-                                         x_axis->filter_scale;
-                  gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
-                                                                        (dist_x * dist_x) + dist_y2);
-                  const gfloat *src_pixel;
+            case EWA_LAYOUT_RGB:
+              ewa_pixel_rgb (src_buffer, src_width, src_height,
+                             format_info, cache, cache_size,
+                             &use_counter, x_axis, y_axis,
+                             weight_lut, dst_pixel);
+              break;
 
-                  if (weight == 0.0)
-                    continue;
+            case EWA_LAYOUT_RGBA:
+              ewa_pixel_rgba (src_buffer, src_width, src_height,
+                              format_info, cache, cache_size,
+                              &use_counter, x_axis, y_axis,
+                              weight_lut, dst_pixel);
+              break;
 
-                  src_pixel = src_row + ((gsize) src_x * (gsize) channels);
-
-                  ewa_accumulate_pixel (accum,
-                                        src_pixel,
-                                        channels,
-                                        alpha_channel,
-                                        weight);
-                  weight_sum += weight;
-                }
+            case EWA_LAYOUT_GENERIC:
+              ewa_pixel_generic (src_buffer, src_width, src_height,
+                                 format_info, cache, cache_size,
+                                 &use_counter, channels, alpha_channel,
+                                 x_axis, y_axis, weight_lut,
+                                 accum, accum_bytes, dst_pixel);
+              break;
             }
-
-          if (fabs (weight_sum) <= 1.0e-12)
-            {
-              gint          src_x = clamp_gint ((gint) floor (x_axis->center + 0.5),
-                                                0, src_width - 1);
-              gint          src_y = clamp_gint ((gint) floor (y_axis->center + 0.5),
-                                                0, src_height - 1);
-              const gfloat *src_row;
-              const gfloat *src_pixel;
-
-              src_row = get_source_row (src_buffer,
-                                        src_width,
-                                        src_y,
-                                        format_info,
-                                        cache,
-                                        cache_size,
-                                        &use_counter);
-              src_pixel = src_row + ((gsize) src_x * (gsize) channels);
-
-              memset (accum, 0, accum_bytes);
-              ewa_accumulate_pixel (accum,
-                                    src_pixel,
-                                    channels,
-                                    alpha_channel,
-                                    1.0);
-            }
-          else
-            {
-              for (gint c = 0; c < channels; c++)
-                accum[c] /= weight_sum;
-            }
-
-          lanczos_resample_store_pixel (accum,
-                                        dst_pixel,
-                                        channels,
-                                        alpha_channel);
         }
 
       gegl_buffer_set (dst_buffer,
