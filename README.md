@@ -58,12 +58,12 @@ meson compile -C build-release
 
 Supported `cpu-baseline` values are:
 
-- `generic`: no extra ISA requirement; use this only when maximum compatibility is more important than release performance.
+- `generic`: no extra ISA requirement; this is the safest public Windows release artifact.
 - `x86-64-v2`, `x86-64-v3`, `x86-64-v4`: x86_64 feature levels. `x86-64-v3` enables AVX/AVX2/FMA/BMI-class code generation on GCC/Clang-family compilers.
 - `armv8-a`, `armv8.2-a`: AArch64 baselines for ARM builds. AArch64 already includes SIMD/NEON as a baseline feature.
 - `native`: local-machine tuning only; do not use this for public release artifacts.
 
-For public Windows releases, `x86-64-v3` is the default build and `x86-64-v2` is the legacy hardware compatibility build. A binary built with `x86-64-v3` will not run on older x86_64 CPUs without AVX2/FMA/BMI-class support.
+For public Windows releases, publish the generic build and an optimized `x86-64-v3` build side by side. A binary built with `x86-64-v3` will not run on older x86_64 CPUs without AVX2/FMA/BMI-class support.
 
 ## GitHub Actions
 
@@ -71,8 +71,8 @@ The CI workflow builds and tests the standalone resampler on Linux, macOS, Windo
 
 Tagging a release with a version tag such as `v1.0` or `v1.2.3` runs the release workflow. It publishes Windows x86_64 plug-in zips for:
 
-- `lanczos-scale-windows-x86_64.zip`: default x86-64-v3 build for modern CPUs.
-- `lanczos-scale-windows-x86_64-legacy.zip`: legacy x86-64-v2 build for older CPUs.
+- `lanczos-scale-windows-x86_64.zip`: generic build with no extra x86_64 ISA requirement.
+- `lanczos-scale-windows-x86_64-v3.zip`: optimized x86-64-v3 build for modern CPUs.
 
 Each release zip includes `INSTALL-WINDOWS.txt`. To install, close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
 

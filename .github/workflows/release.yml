@@ -23,12 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - cpu-baseline: x86-64-v3
+          - cpu-baseline: generic
             artifact: lanczos-scale-windows-x86_64
-            note: Default Windows build for modern x86_64 CPUs with AVX2/FMA/BMI-class support.
-          - cpu-baseline: x86-64-v2
-            artifact: lanczos-scale-windows-x86_64-legacy
-            note: Legacy hardware compatibility build for older x86_64 CPUs without AVX2/FMA/BMI-class support.
+            note: Portable Windows build with no extra x86_64 ISA requirement.
+          - cpu-baseline: x86-64-v3
+            artifact: lanczos-scale-windows-x86_64-v3
+            note: Optimized Windows build for modern x86_64 CPUs with AVX2/FMA/BMI-class support.
 
     defaults:
       run:
@@ -89,7 +89,7 @@ jobs:
           %APPDATA%\GIMP\3.2\plug-ins\lanczos-scale\lanczos-scale.exe
 
           The folder basename and executable basename must both be lanczos-scale.
-          Use lanczos-scale-windows-x86_64.zip by default. Use the legacy zip only for older CPUs that do not support the default build.
+          Use lanczos-scale-windows-x86_64.zip by default. Use the v3 zip only on CPUs that support AVX2/FMA/BMI-class instructions.
           "@
           Set-Content -LiteralPath "$package/INSTALL-WINDOWS.txt" -Value $installInfo -Encoding UTF8
           $baselineInfo = @"
@@ -130,7 +130,7 @@ jobs:
           body: |
             ## Windows install
 
-            Download `lanczos-scale-windows-x86_64.zip` unless you need legacy hardware compatibility. Close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
+            Download `lanczos-scale-windows-x86_64.zip` unless you specifically want the optimized x86-64-v3 build and your CPU supports it. Close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
 
             ```text
             %APPDATA%\GIMP\3.2\plug-ins
@@ -144,7 +144,7 @@ jobs:
 
             Restart GIMP, then use `Image > Lanczos Scale...` or `Layer > Lanczos Scale...`.
 
-            Use `lanczos-scale-windows-x86_64-legacy.zip` only on older x86_64 CPUs that do not support the default x86-64-v3 build.
+            Use `lanczos-scale-windows-x86_64-v3.zip` only on modern x86_64 CPUs with AVX2/FMA/BMI-class support.
           draft: false
           prerelease: false
           tag_name: ${{ github.ref_name }}

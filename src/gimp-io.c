@@ -2,6 +2,8 @@
 
 #include "gimp-io.h"
 
+#include <string.h>
+
 typedef struct
 {
   gint    row;
@@ -176,11 +178,16 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
   LanczosContribTable *x_table = NULL;
   LanczosContribTable *y_table = NULL;
   RowCacheSlot        *cache   = NULL;
+  const gfloat       **tap_rows = NULL;
   gfloat              *src_row = NULL;
   gfloat              *dst_row = NULL;
+  gdouble             *accum_row = NULL;
   gsize                src_row_values = 0;
   gsize                dst_row_values = 0;
+  gsize                accum_row_bytes = 0;
   gint                 cache_size = 0;
+  gint                 channels;
+  gint                 alpha_channel;
   gint                 dy;
   guint64              use_counter = 1;
 
@@ -197,6 +204,9 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
       set_error (error, "Invalid image dimensions or channel count.");
       return FALSE;
     }
+
+  channels = format_info->channels;
+  alpha_channel = format_info->alpha_channel;
 
   if (src_width == dst_width && src_height == dst_height)
     {
@@ -227,17 +237,22 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
                            &src_row_values) ||
       mul_gsize_overflows ((gsize) dst_width,
                            (gsize) format_info->channels,
-                           &dst_row_values))
+                           &dst_row_values) ||
+      mul_gsize_overflows (dst_row_values,
+                           sizeof (*accum_row),
+                           &accum_row_bytes))
     {
       set_error (error, "Image dimensions are too large.");
       goto fail;
     }
 
   cache = g_try_new0 (RowCacheSlot, (gsize) cache_size);
+  tap_rows = g_try_new (const gfloat *, (gsize) y_table->max_taps);
   src_row = g_try_new (gfloat, src_row_values);
   dst_row = g_try_new (gfloat, dst_row_values);
+  accum_row = g_try_new (gdouble, dst_row_values);
 
-  if (! cache || ! src_row || ! dst_row)
+  if (! cache || ! tap_rows || ! src_row || ! dst_row || ! accum_row)
     {
       set_error (error, "Could not allocate row buffers.");
       goto fail;
@@ -277,36 +292,28 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
             }
 
           slot->used_at = use_counter++;
+          tap_rows[i] = slot->pixels;
+        }
+
+      memset (accum_row, 0, accum_row_bytes);
+
+      for (gint i = 0; i < y_contrib->n; i++)
+        {
+          const gfloat *row = tap_rows[i];
+          gdouble       weight = y_contrib->weights[i];
+
+          for (gsize j = 0; j < dst_row_values; j++)
+            accum_row[j] += (gdouble) row[j] * weight;
         }
 
       for (dx = 0; dx < dst_width; dx++)
         {
-          gdouble accum[16] = { 0.0, };
-
-          for (gint i = 0; i < y_contrib->n; i++)
-            {
-              RowCacheSlot *slot = find_cache_slot (cache, cache_size,
-                                                    y_contrib->pixels[i]);
-              const gfloat *pixel;
-
-              if (! slot)
-                {
-                  set_error (error, "Internal row cache miss.");
-                  goto fail;
-                }
-
-              pixel = slot->pixels + ((size_t) dx *
-                                      (size_t) format_info->channels);
-
-              for (gint c = 0; c < format_info->channels; c++)
-                accum[c] += (gdouble) pixel[c] * y_contrib->weights[i];
-            }
-
-          lanczos_resample_store_pixel (accum,
+          lanczos_resample_store_pixel (accum_row + ((size_t) dx *
+                                                     (size_t) channels),
                                         dst_row + ((size_t) dx *
-                                                   (size_t) format_info->channels),
-                                        format_info->channels,
-                                        format_info->alpha_channel);
+                                                   (size_t) channels),
+                                        channels,
+                                        alpha_channel);
         }
 
       gegl_buffer_set (dst_buffer,
@@ -326,8 +333,10 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
   gegl_buffer_flush (dst_buffer);
 
   row_cache_free (cache, cache_size);
+  g_free (tap_rows);
   g_free (src_row);
   g_free (dst_row);
+  g_free (accum_row);
   lanczos_contrib_table_free (x_table);
   lanczos_contrib_table_free (y_table);
 
@@ -335,8 +344,10 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
 
 fail:
   row_cache_free (cache, cache_size);
+  g_free (tap_rows);
   g_free (src_row);
   g_free (dst_row);
+  g_free (accum_row);
   lanczos_contrib_table_free (x_table);
   lanczos_contrib_table_free (y_table);
 

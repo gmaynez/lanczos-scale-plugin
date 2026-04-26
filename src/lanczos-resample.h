@@ -5,6 +5,18 @@
 
 #include <stdbool.h>
 
+#ifndef LANCZOS_RESTRICT
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#define LANCZOS_RESTRICT restrict
+#elif defined(__GNUC__) || defined(__clang__)
+#define LANCZOS_RESTRICT __restrict__
+#elif defined(_MSC_VER)
+#define LANCZOS_RESTRICT __restrict
+#else
+#define LANCZOS_RESTRICT
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,23 +57,23 @@ LanczosContribTable * lanczos_contrib_table_new       (int                    sr
                                                        LanczosKernel          kernel);
 void                  lanczos_contrib_table_free      (LanczosContribTable   *table);
 
-void                  lanczos_resample_horizontal_row (const float           *src_row,
-                                                       float                 *dst_row,
+void                  lanczos_resample_horizontal_row (const float           *LANCZOS_RESTRICT src_row,
+                                                       float                 *LANCZOS_RESTRICT dst_row,
                                                        int                    channels,
                                                        int                    alpha_channel,
-                                                       const LanczosContribTable *x_table);
+                                                       const LanczosContribTable *LANCZOS_RESTRICT x_table);
 
-void                  lanczos_resample_store_pixel    (const double          *accum,
-                                                       float                 *dst_pixel,
+void                  lanczos_resample_store_pixel    (const double          *LANCZOS_RESTRICT accum,
+                                                       float                 *LANCZOS_RESTRICT dst_pixel,
                                                        int                    channels,
                                                        int                    alpha_channel);
 
-bool                  lanczos_resample_float          (const float           *src,
+bool                  lanczos_resample_float          (const float           *LANCZOS_RESTRICT src,
                                                        int                    src_width,
                                                        int                    src_height,
                                                        int                    channels,
                                                        int                    alpha_channel,
-                                                       float                 *dst,
+                                                       float                 *LANCZOS_RESTRICT dst,
                                                        int                    dst_width,
                                                        int                    dst_height,
                                                        LanczosKernel          kernel,

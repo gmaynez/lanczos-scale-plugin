@@ -286,18 +286,19 @@ lanczos_contrib_table_free (LanczosContribTable *table)
   free (table);
 }
 
-void
-lanczos_resample_horizontal_row (const float                *src_row,
-                                 float                      *dst_row,
-                                 int                         channels,
-                                 int                         alpha_channel,
-                                 const LanczosContribTable  *x_table)
+static void
+lanczos_resample_horizontal_row_generic (const float               *LANCZOS_RESTRICT src_row,
+                                         float                     *LANCZOS_RESTRICT dst_row,
+                                         int                        channels,
+                                         int                        alpha_channel,
+                                         const LanczosContribTable *LANCZOS_RESTRICT x_table)
 {
   int x;
 
   for (x = 0; x < x_table->dst_size; x++)
     {
       const LanczosContribution *contrib = &x_table->items[x];
+      int                        first = contrib->pixels[0];
       int                        c;
 
       for (c = 0; c < channels; c++)
@@ -307,7 +308,7 @@ lanczos_resample_horizontal_row (const float                *src_row,
 
           for (i = 0; i < contrib->n; i++)
             {
-              const float *src_px = src_row + ((size_t) contrib->pixels[i] *
+              const float *src_px = src_row + (((size_t) first + (size_t) i) *
                                                (size_t) channels);
               double       value  = src_px[c];
 
@@ -322,9 +323,168 @@ lanczos_resample_horizontal_row (const float                *src_row,
     }
 }
 
+static void
+lanczos_resample_horizontal_row_y (const float               *LANCZOS_RESTRICT src_row,
+                                   float                     *LANCZOS_RESTRICT dst_row,
+                                   const LanczosContribTable *LANCZOS_RESTRICT x_table)
+{
+  int x;
+
+  for (x = 0; x < x_table->dst_size; x++)
+    {
+      const LanczosContribution *contrib = &x_table->items[x];
+      const double              *weights = contrib->weights;
+      const float               *src_px = src_row + (size_t) contrib->pixels[0];
+      double                     y = 0.0;
+      int                        i;
+
+      for (i = 0; i < contrib->n; i++)
+        y += (double) src_px[i] * weights[i];
+
+      dst_row[x] = (float) y;
+    }
+}
+
+static void
+lanczos_resample_horizontal_row_ya (const float               *LANCZOS_RESTRICT src_row,
+                                    float                     *LANCZOS_RESTRICT dst_row,
+                                    const LanczosContribTable *LANCZOS_RESTRICT x_table)
+{
+  int x;
+
+  for (x = 0; x < x_table->dst_size; x++)
+    {
+      const LanczosContribution *contrib = &x_table->items[x];
+      const double              *weights = contrib->weights;
+      const float               *src_px = src_row + ((size_t) contrib->pixels[0] * 2u);
+      double                     y = 0.0;
+      double                     a = 0.0;
+      int                        i;
+
+      for (i = 0; i < contrib->n; i++)
+        {
+          double alpha = src_px[1];
+          double weight = weights[i];
+
+          y += (double) src_px[0] * alpha * weight;
+          a += alpha * weight;
+          src_px += 2;
+        }
+
+      dst_row[((size_t) x * 2u) + 0u] = (float) y;
+      dst_row[((size_t) x * 2u) + 1u] = (float) a;
+    }
+}
+
+static void
+lanczos_resample_horizontal_row_rgb (const float               *LANCZOS_RESTRICT src_row,
+                                     float                     *LANCZOS_RESTRICT dst_row,
+                                     const LanczosContribTable *LANCZOS_RESTRICT x_table)
+{
+  int x;
+
+  for (x = 0; x < x_table->dst_size; x++)
+    {
+      const LanczosContribution *contrib = &x_table->items[x];
+      const double              *weights = contrib->weights;
+      const float               *src_px = src_row + ((size_t) contrib->pixels[0] * 3u);
+      double                     r = 0.0;
+      double                     g = 0.0;
+      double                     b = 0.0;
+      int                        i;
+
+      for (i = 0; i < contrib->n; i++)
+        {
+          double weight = weights[i];
+
+          r += (double) src_px[0] * weight;
+          g += (double) src_px[1] * weight;
+          b += (double) src_px[2] * weight;
+          src_px += 3;
+        }
+
+      dst_row[((size_t) x * 3u) + 0u] = (float) r;
+      dst_row[((size_t) x * 3u) + 1u] = (float) g;
+      dst_row[((size_t) x * 3u) + 2u] = (float) b;
+    }
+}
+
+static void
+lanczos_resample_horizontal_row_rgba (const float               *LANCZOS_RESTRICT src_row,
+                                      float                     *LANCZOS_RESTRICT dst_row,
+                                      const LanczosContribTable *LANCZOS_RESTRICT x_table)
+{
+  int x;
+
+  for (x = 0; x < x_table->dst_size; x++)
+    {
+      const LanczosContribution *contrib = &x_table->items[x];
+      const double              *weights = contrib->weights;
+      const float               *src_px = src_row + ((size_t) contrib->pixels[0] * 4u);
+      double                     r = 0.0;
+      double                     g = 0.0;
+      double                     b = 0.0;
+      double                     a = 0.0;
+      int                        i;
+
+      for (i = 0; i < contrib->n; i++)
+        {
+          double alpha = src_px[3];
+          double weight = weights[i];
+          double premul_weight = alpha * weight;
+
+          r += (double) src_px[0] * premul_weight;
+          g += (double) src_px[1] * premul_weight;
+          b += (double) src_px[2] * premul_weight;
+          a += alpha * weight;
+          src_px += 4;
+        }
+
+      dst_row[((size_t) x * 4u) + 0u] = (float) r;
+      dst_row[((size_t) x * 4u) + 1u] = (float) g;
+      dst_row[((size_t) x * 4u) + 2u] = (float) b;
+      dst_row[((size_t) x * 4u) + 3u] = (float) a;
+    }
+}
+
 void
-lanczos_resample_store_pixel (const double *accum,
-                              float        *dst_pixel,
+lanczos_resample_horizontal_row (const float               *LANCZOS_RESTRICT src_row,
+                                 float                     *LANCZOS_RESTRICT dst_row,
+                                 int                        channels,
+                                 int                        alpha_channel,
+                                 const LanczosContribTable *LANCZOS_RESTRICT x_table)
+{
+  if (channels == 1 && alpha_channel < 0)
+    {
+      lanczos_resample_horizontal_row_y (src_row, dst_row, x_table);
+      return;
+    }
+
+  if (channels == 2 && alpha_channel == 1)
+    {
+      lanczos_resample_horizontal_row_ya (src_row, dst_row, x_table);
+      return;
+    }
+
+  if (channels == 3 && alpha_channel < 0)
+    {
+      lanczos_resample_horizontal_row_rgb (src_row, dst_row, x_table);
+      return;
+    }
+
+  if (channels == 4 && alpha_channel == 3)
+    {
+      lanczos_resample_horizontal_row_rgba (src_row, dst_row, x_table);
+      return;
+    }
+
+  lanczos_resample_horizontal_row_generic (src_row, dst_row,
+                                           channels, alpha_channel, x_table);
+}
+
+void
+lanczos_resample_store_pixel (const double *LANCZOS_RESTRICT accum,
+                              float        *LANCZOS_RESTRICT dst_pixel,
                               int           channels,
                               int           alpha_channel)
 {
@@ -363,12 +523,12 @@ lanczos_resample_store_pixel (const double *accum,
 }
 
 bool
-lanczos_resample_float (const float         *src,
+lanczos_resample_float (const float         *LANCZOS_RESTRICT src,
                         int                  src_width,
                         int                  src_height,
                         int                  channels,
                         int                  alpha_channel,
-                        float               *dst,
+                        float               *LANCZOS_RESTRICT dst,
                         int                  dst_width,
                         int                  dst_height,
                         LanczosKernel        kernel,
@@ -378,8 +538,11 @@ lanczos_resample_float (const float         *src,
   LanczosContribTable *x_table = NULL;
   LanczosContribTable *y_table = NULL;
   float               *tmp     = NULL;
+  double              *accum_row = NULL;
   size_t               tmp_count;
   size_t               tmp_bytes;
+  size_t               dst_row_values;
+  size_t               accum_row_bytes;
   int                  y;
 
   if (! src || ! dst ||
@@ -409,18 +572,24 @@ lanczos_resample_float (const float         *src,
 
   if (mul_size_overflows ((size_t) src_height, (size_t) dst_width, &tmp_count) ||
       mul_size_overflows (tmp_count, (size_t) channels, &tmp_count) ||
-      mul_size_overflows (tmp_count, sizeof (*tmp), &tmp_bytes))
+      mul_size_overflows (tmp_count, sizeof (*tmp), &tmp_bytes) ||
+      mul_size_overflows ((size_t) dst_width, (size_t) channels,
+                          &dst_row_values) ||
+      mul_size_overflows (dst_row_values, sizeof (*accum_row),
+                          &accum_row_bytes))
     return false;
 
   x_table = lanczos_contrib_table_new (src_width, dst_width, kernel);
   y_table = lanczos_contrib_table_new (src_height, dst_height, kernel);
   tmp = (float *) malloc (tmp_bytes);
+  accum_row = (double *) malloc (accum_row_bytes);
 
-  if (! x_table || ! y_table || ! tmp)
+  if (! x_table || ! y_table || ! tmp || ! accum_row)
     {
       lanczos_contrib_table_free (x_table);
       lanczos_contrib_table_free (y_table);
       free (tmp);
+      free (accum_row);
       return false;
     }
 
@@ -449,28 +618,27 @@ lanczos_resample_float (const float         *src,
                                                   (size_t) dst_width *
                                                   (size_t) channels);
       int                        x;
+      int                        i;
+
+      memset (accum_row, 0, accum_row_bytes);
+
+      for (i = 0; i < contrib->n; i++)
+        {
+          const float *tmp_row = tmp +
+                                 ((size_t) contrib->pixels[i] *
+                                  (size_t) dst_width *
+                                  (size_t) channels);
+          double       weight = contrib->weights[i];
+          size_t       j;
+
+          for (j = 0; j < dst_row_values; j++)
+            accum_row[j] += (double) tmp_row[j] * weight;
+        }
 
       for (x = 0; x < dst_width; x++)
         {
-          double accum[16];
-          int    c;
-          int    i;
-
-          memset (accum, 0, sizeof (accum));
-
-          for (i = 0; i < contrib->n; i++)
-            {
-              const float *tmp_px = tmp +
-                                    (((size_t) contrib->pixels[i] *
-                                      (size_t) dst_width +
-                                      (size_t) x) *
-                                     (size_t) channels);
-
-              for (c = 0; c < channels; c++)
-                accum[c] += (double) tmp_px[c] * contrib->weights[i];
-            }
-
-          lanczos_resample_store_pixel (accum,
+          lanczos_resample_store_pixel (accum_row + ((size_t) x *
+                                                     (size_t) channels),
                                         dst_row + ((size_t) x *
                                                    (size_t) channels),
                                         channels,
@@ -489,6 +657,7 @@ lanczos_resample_float (const float         *src,
   lanczos_contrib_table_free (x_table);
   lanczos_contrib_table_free (y_table);
   free (tmp);
+  free (accum_row);
 
   return true;
 }
