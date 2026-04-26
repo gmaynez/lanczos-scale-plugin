@@ -12,9 +12,10 @@
 
 #include "gimp-io.h"
 
-#define PLUG_IN_PROC   "plug-in-lanczos-scale"
-#define PLUG_IN_BINARY "lanczos-scale"
-#define PLUG_IN_ROLE   "gimp-lanczos-scale"
+#define PLUG_IN_PROC_IMAGE "plug-in-lanczos-scale"
+#define PLUG_IN_PROC_LAYER "plug-in-lanczos-scale-layer"
+#define PLUG_IN_BINARY     "lanczos-scale"
+#define PLUG_IN_ROLE       "gimp-lanczos-scale"
 
 #define LANCZOS_RESPONSE_RESET 1
 
@@ -42,6 +43,21 @@ typedef struct
   gchar               *kernel;
   gboolean             linear_light;
 } DialogDefaults;
+
+typedef struct
+{
+  gint total;
+  gint completed;
+} ProgressCounter;
+
+typedef struct
+{
+  GimpDrawable      *drawable;
+  GeglBuffer        *src_buffer;
+  LanczosGimpFormat  format_info;
+  gint               src_width;
+  gint               src_height;
+} DrawableSnapshot;
 
 struct _LanczosScale
 {
@@ -100,7 +116,12 @@ lanczos_scale_init (LanczosScale *self G_GNUC_UNUSED)
 static GList *
 lanczos_scale_query_procedures (GimpPlugIn *plug_in G_GNUC_UNUSED)
 {
-  return g_list_append (NULL, g_strdup (PLUG_IN_PROC));
+  GList *procedures = NULL;
+
+  procedures = g_list_append (procedures, g_strdup (PLUG_IN_PROC_IMAGE));
+  procedures = g_list_append (procedures, g_strdup (PLUG_IN_PROC_LAYER));
+
+  return procedures;
 }
 
 static gboolean
@@ -144,14 +165,29 @@ lanczos_scale_create_output_choice (void)
                                       NULL);
 }
 
+static gboolean
+lanczos_scale_is_image_procedure (const gchar *name)
+{
+  return g_strcmp0 (name, PLUG_IN_PROC_IMAGE) == 0;
+}
+
+static gboolean
+lanczos_scale_is_layer_procedure (const gchar *name)
+{
+  return g_strcmp0 (name, PLUG_IN_PROC_LAYER) == 0;
+}
+
 static GimpProcedure *
 lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
                                 const gchar *name)
 {
   GimpProcedure *procedure = NULL;
 
-  if (g_strcmp0 (name, PLUG_IN_PROC) == 0)
+  if (lanczos_scale_is_image_procedure (name) ||
+      lanczos_scale_is_layer_procedure (name))
     {
+      gboolean image_procedure = lanczos_scale_is_image_procedure (name);
+
       procedure = gimp_image_procedure_new (plug_in,
                                             name,
                                             GIMP_PDB_PROC_TYPE_PLUGIN,
@@ -161,14 +197,24 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
 
       gimp_procedure_set_image_types (procedure, "RGB*, GRAY*");
       gimp_procedure_set_sensitivity_mask (procedure,
+                                           image_procedure ?
+                                           (GIMP_PROCEDURE_SENSITIVE_DRAWABLE  |
+                                            GIMP_PROCEDURE_SENSITIVE_DRAWABLES |
+                                            GIMP_PROCEDURE_SENSITIVE_NO_DRAWABLES) :
                                            GIMP_PROCEDURE_SENSITIVE_DRAWABLE);
       gimp_procedure_set_menu_label (procedure, "_Lanczos Scale...");
-      gimp_procedure_add_menu_path (procedure, "<Image>/Image/[Scale]");
-      gimp_procedure_add_menu_path (procedure, "<Image>/Layer/[Scale]");
+      gimp_procedure_add_menu_path (procedure,
+                                    image_procedure ?
+                                    "<Image>/Image/[Scale]" :
+                                    "<Image>/Layer/[Scale]");
       gimp_procedure_set_documentation (procedure,
+                                        image_procedure ?
+                                        "Scale the image with a custom Lanczos resampler" :
                                         "Scale the selected layer with a custom Lanczos resampler",
-                                        "Scales the selected layer drawable in place using a separable Lanczos2 or Lanczos3 filter.",
-                                        PLUG_IN_PROC);
+                                        image_procedure ?
+                                        "Scales the image canvas, layers, layer masks, channels, and selection in place using a separable Lanczos2 or Lanczos3 filter." :
+                                        "Scales the selected layer drawable and mask in place without changing the image canvas or other layers.",
+                                        name);
       gimp_procedure_set_attribution (procedure,
                                       "OpenAI Codex",
                                       "OpenAI Codex",
@@ -384,6 +430,30 @@ progress_cb (gdouble  fraction,
   gimp_progress_update (fraction);
 }
 
+static void
+progress_counter_cb (gdouble  fraction,
+                     gpointer data)
+{
+  ProgressCounter *counter = data;
+
+  if (! counter || counter->total <= 0)
+    return;
+
+  gimp_progress_update (((gdouble) counter->completed + fraction) /
+                        (gdouble) counter->total);
+}
+
+static void
+progress_counter_finish_item (ProgressCounter *counter)
+{
+  if (! counter || counter->total <= 0)
+    return;
+
+  counter->completed++;
+  gimp_progress_update ((gdouble) counter->completed /
+                        (gdouble) counter->total);
+}
+
 static GeglBuffer *
 copy_source_buffer (GimpDrawable *drawable,
                     gint          width,
@@ -403,6 +473,560 @@ copy_source_buffer (GimpDrawable *drawable,
   g_clear_object (&src);
 
   return copy;
+}
+
+static void
+clear_drawable_snapshots (DrawableSnapshot *snapshots,
+                          gint              n_snapshots)
+{
+  if (! snapshots)
+    return;
+
+  for (gint i = 0; i < n_snapshots; i++)
+    g_clear_object (&snapshots[i].src_buffer);
+
+  g_free (snapshots);
+}
+
+static gboolean
+init_drawable_snapshot (DrawableSnapshot *snapshot,
+                        GimpDrawable     *drawable,
+                        gboolean          linear_light,
+                        GError          **error)
+{
+  g_return_val_if_fail (snapshot != NULL, FALSE);
+  g_return_val_if_fail (GIMP_IS_DRAWABLE (drawable), FALSE);
+
+  snapshot->drawable = drawable;
+  snapshot->src_width = gimp_drawable_get_width (drawable);
+  snapshot->src_height = gimp_drawable_get_height (drawable);
+
+  if (! lanczos_gimp_format_for_drawable (drawable,
+                                          linear_light,
+                                          &snapshot->format_info,
+                                          error))
+    return FALSE;
+
+  snapshot->src_buffer = copy_source_buffer (drawable,
+                                             snapshot->src_width,
+                                             snapshot->src_height);
+
+  if (! snapshot->src_buffer)
+    {
+      g_set_error_literal (error, GIMP_PLUG_IN_ERROR, 0,
+                           "Could not copy source pixels.");
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
+resample_drawable_from_snapshot (const DrawableSnapshot *snapshot,
+                                 gint                    dst_width,
+                                 gint                    dst_height,
+                                 LanczosKernel           kernel,
+                                 ProgressCounter        *progress,
+                                 GError                **error)
+{
+  GeglBuffer *dst_buffer;
+  gboolean    success;
+
+  g_return_val_if_fail (snapshot != NULL, FALSE);
+  g_return_val_if_fail (snapshot->src_buffer != NULL, FALSE);
+  g_return_val_if_fail (GIMP_IS_DRAWABLE (snapshot->drawable), FALSE);
+
+  dst_buffer = gimp_drawable_get_buffer (snapshot->drawable);
+
+  success = lanczos_gegl_resample (snapshot->src_buffer,
+                                   dst_buffer,
+                                   snapshot->src_width,
+                                   snapshot->src_height,
+                                   dst_width,
+                                   dst_height,
+                                   &snapshot->format_info,
+                                   kernel,
+                                   progress ? progress_counter_cb : NULL,
+                                   progress,
+                                   error);
+
+  if (success)
+    {
+      gimp_drawable_update (snapshot->drawable, 0, 0,
+                            dst_width, dst_height);
+      progress_counter_finish_item (progress);
+    }
+
+  g_clear_object (&dst_buffer);
+
+  return success;
+}
+
+static gint
+scale_int_round (gint    value,
+                 gdouble scale)
+{
+  gdouble scaled = (gdouble) value * scale;
+
+  return (gint) (scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
+}
+
+static gint
+scale_size_round (gint    value,
+                  gdouble scale)
+{
+  return MAX (1, scale_int_round (value, scale));
+}
+
+static gboolean
+resample_layer_in_place (GimpLayer     *layer,
+                         gint           dst_width,
+                         gint           dst_height,
+                         gint           dst_offset_x,
+                         gint           dst_offset_y,
+                         LanczosKernel  kernel,
+                         gboolean       linear_light,
+                         ProgressCounter *progress,
+                         GError       **error)
+{
+  GimpDrawable    *drawable = GIMP_DRAWABLE (layer);
+  GimpLayerMask   *mask;
+  DrawableSnapshot layer_snapshot = { 0, };
+  DrawableSnapshot mask_snapshot = { 0, };
+  gboolean         has_mask;
+  gboolean         success = FALSE;
+
+  mask = gimp_layer_get_mask (layer);
+  has_mask = mask != NULL;
+
+  if (! init_drawable_snapshot (&layer_snapshot,
+                                drawable,
+                                linear_light,
+                                error))
+    return FALSE;
+
+  if (has_mask &&
+      ! init_drawable_snapshot (&mask_snapshot,
+                                GIMP_DRAWABLE (mask),
+                                linear_light,
+                                error))
+    goto out;
+
+  if (! gimp_layer_resize (layer, dst_width, dst_height, 0, 0))
+    {
+      g_set_error_literal (error, GIMP_PLUG_IN_ERROR, 0,
+                           "Could not resize layer.");
+      goto out;
+    }
+
+  if (! gimp_layer_set_offsets (layer, dst_offset_x, dst_offset_y))
+    {
+      g_set_error_literal (error, GIMP_PLUG_IN_ERROR, 0,
+                           "Could not position resized layer.");
+      goto out;
+    }
+
+  if (! resample_drawable_from_snapshot (&layer_snapshot,
+                                         dst_width,
+                                         dst_height,
+                                         kernel,
+                                         progress,
+                                         error))
+    goto out;
+
+  if (has_mask &&
+      ! resample_drawable_from_snapshot (&mask_snapshot,
+                                         gimp_drawable_get_width (GIMP_DRAWABLE (mask)),
+                                         gimp_drawable_get_height (GIMP_DRAWABLE (mask)),
+                                         kernel,
+                                         progress,
+                                         error))
+    goto out;
+
+  success = TRUE;
+
+out:
+  g_clear_object (&layer_snapshot.src_buffer);
+  g_clear_object (&mask_snapshot.src_buffer);
+
+  return success;
+}
+
+static gboolean
+resample_layer_centered (GimpLayer     *layer,
+                         gint           dst_width,
+                         gint           dst_height,
+                         LanczosKernel  kernel,
+                         gboolean       linear_light,
+                         ProgressCounter *progress,
+                         GError       **error)
+{
+  gint src_width;
+  gint src_height;
+  gint src_offset_x = 0;
+  gint src_offset_y = 0;
+  gint dst_offset_x;
+  gint dst_offset_y;
+
+  src_width = gimp_drawable_get_width (GIMP_DRAWABLE (layer));
+  src_height = gimp_drawable_get_height (GIMP_DRAWABLE (layer));
+
+  gimp_drawable_get_offsets (GIMP_DRAWABLE (layer),
+                             &src_offset_x,
+                             &src_offset_y);
+
+  dst_offset_x = src_offset_x + (src_width - dst_width) / 2;
+  dst_offset_y = src_offset_y + (src_height - dst_height) / 2;
+
+  return resample_layer_in_place (layer,
+                                  dst_width,
+                                  dst_height,
+                                  dst_offset_x,
+                                  dst_offset_y,
+                                  kernel,
+                                  linear_light,
+                                  progress,
+                                  error);
+}
+
+static gboolean
+validate_layer_tree_formats (GimpItem  *item,
+                             gboolean   linear_light,
+                             GError   **error)
+{
+  LanczosGimpFormat format_info;
+
+  if (GIMP_IS_LAYER (item))
+    {
+      GimpLayer     *layer = GIMP_LAYER (item);
+      GimpLayerMask *mask = gimp_layer_get_mask (layer);
+
+      if (! gimp_item_is_group (item) &&
+          ! lanczos_gimp_format_for_drawable (GIMP_DRAWABLE (layer),
+                                              linear_light,
+                                              &format_info,
+                                              error))
+        return FALSE;
+
+      if (mask &&
+          ! lanczos_gimp_format_for_drawable (GIMP_DRAWABLE (mask),
+                                              linear_light,
+                                              &format_info,
+                                              error))
+        return FALSE;
+    }
+
+  if (gimp_item_is_group (item))
+    {
+      GimpItem **children = gimp_item_get_children (item);
+      gint       n_children;
+      gboolean   success = TRUE;
+
+      n_children = gimp_core_object_array_get_length ((GObject **) children);
+
+      for (gint i = 0; i < n_children; i++)
+        {
+          if (! validate_layer_tree_formats (children[i],
+                                             linear_light,
+                                             error))
+            {
+              success = FALSE;
+              break;
+            }
+        }
+
+      g_free (children);
+
+      return success;
+    }
+
+  return TRUE;
+}
+
+static gint
+count_layer_tree_scale_jobs (GimpItem *item)
+{
+  gint jobs = 0;
+
+  if (GIMP_IS_LAYER (item))
+    {
+      GimpLayer *layer = GIMP_LAYER (item);
+
+      if (! gimp_item_is_group (item))
+        jobs++;
+
+      if (gimp_layer_get_mask (layer))
+        jobs++;
+    }
+
+  if (gimp_item_is_group (item))
+    {
+      GimpItem **children = gimp_item_get_children (item);
+      gint       n_children;
+
+      n_children = gimp_core_object_array_get_length ((GObject **) children);
+
+      for (gint i = 0; i < n_children; i++)
+        jobs += count_layer_tree_scale_jobs (children[i]);
+
+      g_free (children);
+    }
+
+  return jobs;
+}
+
+static gboolean
+snapshot_image_aux_drawables (GimpImage          *image,
+                              gboolean            linear_light,
+                              DrawableSnapshot  **snapshots,
+                              gint               *n_snapshots,
+                              GError            **error)
+{
+  GimpChannel   **channels;
+  GimpSelection  *selection;
+  gint            n_channels;
+  gint            total;
+  gint            index = 0;
+
+  g_return_val_if_fail (snapshots != NULL, FALSE);
+  g_return_val_if_fail (n_snapshots != NULL, FALSE);
+
+  *snapshots = NULL;
+  *n_snapshots = 0;
+
+  channels = gimp_image_get_channels (image);
+  n_channels = gimp_core_object_array_get_length ((GObject **) channels);
+  selection = gimp_image_get_selection (image);
+  total = n_channels + (selection ? 1 : 0);
+
+  if (total == 0)
+    {
+      g_free (channels);
+      return TRUE;
+    }
+
+  *snapshots = g_new0 (DrawableSnapshot, total);
+
+  for (gint i = 0; i < n_channels; i++)
+    {
+      if (! init_drawable_snapshot (&(*snapshots)[index],
+                                    GIMP_DRAWABLE (channels[i]),
+                                    linear_light,
+                                    error))
+        goto fail;
+
+      index++;
+    }
+
+  if (selection)
+    {
+      if (! init_drawable_snapshot (&(*snapshots)[index],
+                                    GIMP_DRAWABLE (selection),
+                                    linear_light,
+                                    error))
+        goto fail;
+
+      index++;
+    }
+
+  g_free (channels);
+  *n_snapshots = index;
+
+  return TRUE;
+
+fail:
+  g_free (channels);
+  clear_drawable_snapshots (*snapshots, total);
+  *snapshots = NULL;
+  *n_snapshots = 0;
+
+  return FALSE;
+}
+
+static gboolean
+resample_item_tree_for_image_scale (GimpItem      *item,
+                                    gdouble        scale_x,
+                                    gdouble        scale_y,
+                                    LanczosKernel  kernel,
+                                    gboolean       linear_light,
+                                    ProgressCounter *progress,
+                                    GError       **error)
+{
+  if (gimp_item_is_group (item))
+    {
+      GimpLayer        *layer = GIMP_LAYER (item);
+      GimpLayerMask    *mask = gimp_layer_get_mask (layer);
+      DrawableSnapshot  mask_snapshot = { 0, };
+      GimpItem        **children = gimp_item_get_children (item);
+      gint              n_children;
+      gboolean          success = FALSE;
+
+      if (mask &&
+          ! init_drawable_snapshot (&mask_snapshot,
+                                    GIMP_DRAWABLE (mask),
+                                    linear_light,
+                                    error))
+        goto out_group;
+
+      n_children = gimp_core_object_array_get_length ((GObject **) children);
+
+      for (gint i = 0; i < n_children; i++)
+        {
+          if (! resample_item_tree_for_image_scale (children[i],
+                                                    scale_x,
+                                                    scale_y,
+                                                    kernel,
+                                                    linear_light,
+                                                    progress,
+                                                    error))
+            {
+              goto out_group;
+            }
+        }
+
+      if (mask &&
+          ! resample_drawable_from_snapshot (&mask_snapshot,
+                                             gimp_drawable_get_width (GIMP_DRAWABLE (mask)),
+                                             gimp_drawable_get_height (GIMP_DRAWABLE (mask)),
+                                             kernel,
+                                             progress,
+                                             error))
+        goto out_group;
+
+      success = TRUE;
+
+out_group:
+      g_clear_object (&mask_snapshot.src_buffer);
+      g_free (children);
+      return success;
+    }
+
+  if (GIMP_IS_LAYER (item))
+    {
+      GimpLayer *layer = GIMP_LAYER (item);
+      gint       src_width;
+      gint       src_height;
+      gint       src_offset_x = 0;
+      gint       src_offset_y = 0;
+
+      src_width = gimp_drawable_get_width (GIMP_DRAWABLE (layer));
+      src_height = gimp_drawable_get_height (GIMP_DRAWABLE (layer));
+      gimp_drawable_get_offsets (GIMP_DRAWABLE (layer),
+                                 &src_offset_x,
+                                 &src_offset_y);
+
+      return resample_layer_in_place (layer,
+                                      scale_size_round (src_width, scale_x),
+                                      scale_size_round (src_height, scale_y),
+                                      scale_int_round (src_offset_x, scale_x),
+                                      scale_int_round (src_offset_y, scale_y),
+                                      kernel,
+                                      linear_light,
+                                      progress,
+                                      error);
+    }
+
+  return TRUE;
+}
+
+static gboolean
+resample_image_in_place (GimpImage     *image,
+                         gint           dst_width,
+                         gint           dst_height,
+                         LanczosKernel  kernel,
+                         gboolean       linear_light,
+                         ProgressCounter *progress,
+                         GError       **error)
+{
+  GimpLayer        **layers;
+  DrawableSnapshot  *aux_snapshots = NULL;
+  gint               n_aux_snapshots = 0;
+  gint               src_width;
+  gint               src_height;
+  gint               n_layers;
+  gdouble            scale_x;
+  gdouble            scale_y;
+  gboolean           success = FALSE;
+
+  src_width = gimp_image_get_width (image);
+  src_height = gimp_image_get_height (image);
+
+  if (src_width <= 0 || src_height <= 0)
+    {
+      g_set_error_literal (error, GIMP_PLUG_IN_ERROR, 0,
+                           "Invalid image dimensions.");
+      return FALSE;
+    }
+
+  scale_x = (gdouble) dst_width / (gdouble) src_width;
+  scale_y = (gdouble) dst_height / (gdouble) src_height;
+
+  layers = gimp_image_get_layers (image);
+  n_layers = gimp_core_object_array_get_length ((GObject **) layers);
+
+  for (gint i = 0; i < n_layers; i++)
+    {
+      if (! validate_layer_tree_formats (GIMP_ITEM (layers[i]),
+                                         linear_light,
+                                         error))
+        goto out;
+    }
+
+  if (! snapshot_image_aux_drawables (image,
+                                      linear_light,
+                                      &aux_snapshots,
+                                      &n_aux_snapshots,
+                                      error))
+    goto out;
+
+  if (progress)
+    {
+      progress->total = n_aux_snapshots;
+      progress->completed = 0;
+
+      for (gint i = 0; i < n_layers; i++)
+        progress->total += count_layer_tree_scale_jobs (GIMP_ITEM (layers[i]));
+    }
+
+  for (gint i = 0; i < n_layers; i++)
+    {
+      if (! resample_item_tree_for_image_scale (GIMP_ITEM (layers[i]),
+                                                scale_x,
+                                                scale_y,
+                                                kernel,
+                                                linear_light,
+                                                progress,
+                                                error))
+        goto out;
+    }
+
+  if (! gimp_image_resize (image, dst_width, dst_height, 0, 0))
+    {
+      g_set_error_literal (error, GIMP_PLUG_IN_ERROR, 0,
+                           "Could not resize image canvas.");
+      goto out;
+    }
+
+  for (gint i = 0; i < n_aux_snapshots; i++)
+    {
+      GimpDrawable *drawable = aux_snapshots[i].drawable;
+
+      if (! resample_drawable_from_snapshot (&aux_snapshots[i],
+                                             gimp_drawable_get_width (drawable),
+                                             gimp_drawable_get_height (drawable),
+                                             kernel,
+                                             progress,
+                                             error))
+        goto out;
+    }
+
+  success = TRUE;
+
+out:
+  clear_drawable_snapshots (aux_snapshots, n_aux_snapshots);
+  g_free (layers);
+
+  return success;
 }
 
 static GtkWidget *
@@ -576,7 +1200,8 @@ run_dialog (GimpProcedure       *procedure,
             GimpProcedureConfig *config,
             GimpImage           *image,
             GimpDrawable        *drawable,
-            gboolean             has_drawable)
+            gboolean             has_drawable,
+            gboolean             image_procedure)
 {
   GtkWidget *dialog;
   GtkWidget *coordinates;
@@ -592,14 +1217,22 @@ run_dialog (GimpProcedure       *procedure,
 
   gimp_ui_init (PLUG_IN_BINARY);
 
-  if (! has_drawable)
+  if (! image_procedure && ! has_drawable)
     return FALSE;
 
-  width = gimp_drawable_get_width (drawable);
-  height = gimp_drawable_get_height (drawable);
+  if (image_procedure)
+    {
+      width = gimp_image_get_width (image);
+      height = gimp_image_get_height (image);
+    }
+  else
+    {
+      width = gimp_drawable_get_width (drawable);
+      height = gimp_drawable_get_height (drawable);
+    }
 
   g_object_set (config,
-                "target", "selected-drawable",
+                "target", image_procedure ? "visible-image" : "selected-drawable",
                 "output-mode", "replace-drawable",
                 NULL);
 
@@ -664,17 +1297,31 @@ present_display_after_resize (GimpDisplay *display)
 static gboolean
 validate_options (TargetMode     target,
                   OutputMode     output_mode,
+                  gboolean       image_procedure,
+                  const gchar   *procedure_name,
                   gint           n_drawables,
                   GimpDrawable  *drawable,
                   GError       **error)
 {
+  if (image_procedure && output_mode == OUTPUT_REPLACE_DRAWABLE)
+    {
+      if (target != TARGET_VISIBLE_IMAGE)
+        {
+          g_set_error_literal (error, GIMP_PLUG_IN_ERROR, 0,
+                               "Image replace mode scales the full image; use visible-image target.");
+          return FALSE;
+        }
+
+      return TRUE;
+    }
+
   if (target == TARGET_SELECTED_DRAWABLE)
     {
       if (n_drawables != 1)
         {
           g_set_error (error, GIMP_PLUG_IN_ERROR, 0,
                        "Procedure '%s' needs exactly one selected drawable for selected-drawable target.",
-                       PLUG_IN_PROC);
+                       procedure_name);
           return FALSE;
         }
 
@@ -755,6 +1402,9 @@ lanczos_scale_run (GimpProcedure        *procedure,
   OutputMode          output_mode;
   LanczosKernel       kernel;
   gboolean            linear_light;
+  gboolean            image_procedure;
+  gboolean            resample_needed = TRUE;
+  ProgressCounter     progress = { 0, 0 };
   gchar              *output_name = NULL;
   gint                n_drawables;
   gint                src_width;
@@ -765,23 +1415,17 @@ lanczos_scale_run (GimpProcedure        *procedure,
   GError             *error = NULL;
 
   gegl_init (NULL, NULL);
+  image_procedure = lanczos_scale_is_image_procedure (gimp_procedure_get_name (procedure));
 
   n_drawables = gimp_core_object_array_get_length ((GObject **) drawables);
   if (n_drawables == 1)
     selected_drawable = drawables[0];
-  else if (n_drawables > 1)
-    {
-      g_set_error (&error, GIMP_PLUG_IN_ERROR, 0,
-                   "Procedure '%s' only works with zero or one selected drawable.",
-                   gimp_procedure_get_name (procedure));
-      return return_with_outputs (procedure, GIMP_PDB_CALLING_ERROR,
-                                  error, NULL, NULL);
-    }
 
   if (run_mode == GIMP_RUN_INTERACTIVE)
     {
       if (! run_dialog (procedure, config, image,
-                        selected_drawable, n_drawables == 1))
+                        selected_drawable, n_drawables == 1,
+                        image_procedure))
         return return_with_outputs (procedure, GIMP_PDB_CANCEL,
                                     NULL, NULL, NULL);
     }
@@ -797,12 +1441,50 @@ lanczos_scale_run (GimpProcedure        *procedure,
                 "name", &output_name,
                 NULL);
 
-  if (! validate_options (target, output_mode, n_drawables,
+  if (! validate_options (target, output_mode,
+                          image_procedure,
+                          gimp_procedure_get_name (procedure),
+                          n_drawables,
                           selected_drawable, &error))
     {
       g_free (output_name);
       return return_with_outputs (procedure, GIMP_PDB_CALLING_ERROR,
                                   error, NULL, NULL);
+    }
+
+  if (image_procedure && output_mode == OUTPUT_REPLACE_DRAWABLE)
+    {
+      gimp_progress_init ("Lanczos Scale");
+
+      gimp_image_undo_group_start (image);
+      undo_started = TRUE;
+
+      if (! resample_image_in_place (image,
+                                     dst_width,
+                                     dst_height,
+                                     kernel,
+                                     linear_light,
+                                     &progress,
+                                     &error))
+        goto execution_error;
+
+      gimp_image_undo_group_end (image);
+      undo_started = FALSE;
+
+      if (run_mode != GIMP_RUN_NONINTERACTIVE)
+        {
+          output_display = gimp_default_display ();
+          present_display_after_resize (output_display);
+        }
+
+      gimp_progress_end ();
+      g_free (output_name);
+
+      return return_with_outputs (procedure,
+                                  GIMP_PDB_SUCCESS,
+                                  NULL,
+                                  image,
+                                  NULL);
     }
 
   if (target == TARGET_VISIBLE_IMAGE)
@@ -888,55 +1570,45 @@ lanczos_scale_run (GimpProcedure        *procedure,
     }
   else
     {
-      src_buffer = copy_source_buffer (source_drawable, src_width, src_height);
-
       gimp_image_undo_group_start (image);
       undo_started = TRUE;
 
-      if (! gimp_layer_resize (GIMP_LAYER (source_drawable),
-                               dst_width,
-                               dst_height,
-                               0,
-                               0))
-        {
-          g_set_error_literal (&error, GIMP_PLUG_IN_ERROR, 0,
-                               "Could not resize selected layer.");
-          goto execution_error;
-        }
+      progress.total = 1;
+      progress.completed = 0;
+      if (gimp_layer_get_mask (GIMP_LAYER (source_drawable)))
+        progress.total++;
 
-      if (! gimp_layer_set_offsets (GIMP_LAYER (source_drawable), 0, 0))
-        {
-          g_set_error_literal (&error, GIMP_PLUG_IN_ERROR, 0,
-                               "Could not move selected layer to the image origin.");
-          goto execution_error;
-        }
-
-      if (! gimp_image_resize (image, dst_width, dst_height, 0, 0))
-        {
-          g_set_error_literal (&error, GIMP_PLUG_IN_ERROR, 0,
-                               "Could not resize image canvas.");
-          goto execution_error;
-        }
+      if (! resample_layer_centered (GIMP_LAYER (source_drawable),
+                                     dst_width,
+                                     dst_height,
+                                     kernel,
+                                     linear_light,
+                                     &progress,
+                                     &error))
+        goto execution_error;
 
       output_layer = GIMP_LAYER (source_drawable);
-      dst_buffer = gimp_drawable_get_buffer (source_drawable);
+      resample_needed = FALSE;
     }
 
-  if (! lanczos_gegl_resample (src_buffer,
-                               dst_buffer,
-                               src_width,
-                               src_height,
-                               dst_width,
-                               dst_height,
-                               &format_info,
-                               kernel,
-                               progress_cb,
-                               NULL,
-                               &error))
-    goto execution_error;
+  if (resample_needed)
+    {
+      if (! lanczos_gegl_resample (src_buffer,
+                                   dst_buffer,
+                                   src_width,
+                                   src_height,
+                                   dst_width,
+                                   dst_height,
+                                   &format_info,
+                                   kernel,
+                                   progress_cb,
+                                   NULL,
+                                   &error))
+        goto execution_error;
 
-  gimp_drawable_update (GIMP_DRAWABLE (output_layer),
-                        0, 0, dst_width, dst_height);
+      gimp_drawable_update (GIMP_DRAWABLE (output_layer),
+                            0, 0, dst_width, dst_height);
+    }
 
   if (undo_started)
     {

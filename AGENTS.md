@@ -6,13 +6,15 @@ This repository contains `Lanczos Scale`, an external GIMP 3 plug-in written in 
 
 ## Current Scope
 
-- Procedure name: `plug-in-lanczos-scale`.
+- Image procedure name: `plug-in-lanczos-scale`.
+- Layer procedure name: `plug-in-lanczos-scale-layer`.
 - Binary name: `lanczos-scale`.
 - Menu paths: `Image > Lanczos Scale...` and `Layer > Lanczos Scale...`.
 - Supported image types: RGB/RGBA and grayscale/gray-alpha.
-- Unsupported for now: indexed drawables, masks, channels, and destructive full layer-stack scaling.
-- Interactive output: replace selected layer and resize the image canvas to the requested size.
-- PDB output modes: new layer, replace selected layer, or new image.
+- Unsupported for now: indexed drawables.
+- Image menu interactive output: scale the image canvas, layers, layer masks, channels, and selection to the requested size.
+- Layer menu interactive output: replace selected layer and mask only; preserve the layer center relative to the canvas, and leave the image canvas and other layers unchanged.
+- PDB output modes: new layer, replace, or new image. Image replace mode scales the current image and requires the visible-image target; layer replace mode requires one selected layer.
 - Resampling: custom separable Lanczos2/Lanczos3 with premultiplied-alpha filtering.
 - Default quality path: linear-light float GEGL formats while preserving the drawable color space.
 
