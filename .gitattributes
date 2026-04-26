@@ -1,0 +1,9 @@
+* text=auto
+
+*.c text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.build text eol=lf
+meson_options.txt text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf

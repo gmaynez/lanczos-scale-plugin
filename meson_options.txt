@@ -1,0 +1,13 @@
+option(
+  'plugindir',
+  type: 'string',
+  value: '',
+  description: 'Install directory for lanczos-scale plug-in folder. Defaults to <prefix>/<libdir>/gimp/3.0/plug-ins/lanczos-scale.',
+)
+
+option(
+  'plugin',
+  type: 'feature',
+  value: 'auto',
+  description: 'Build the GIMP plug-in when gimpui-3.0 and gegl-0.4 development files are available.',
+)

@@ -1,0 +1,29 @@
+# Meson build directories
+build/
+build-*/
+
+# Meson/Ninja generated files
+meson-logs/
+meson-private/
+*.ninja
+.ninja_*
+
+# Build outputs
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.obj
+*.pdb
+
+# Local runtime logs
+*.log
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+Desktop.ini
