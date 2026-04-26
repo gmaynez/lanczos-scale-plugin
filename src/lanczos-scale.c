@@ -16,6 +16,8 @@
 #define PLUG_IN_BINARY "lanczos-scale"
 #define PLUG_IN_ROLE   "gimp-lanczos-scale"
 
+#define LANCZOS_RESPONSE_RESET 1
+
 typedef enum
 {
   TARGET_SELECTED_DRAWABLE,
@@ -31,6 +33,15 @@ typedef enum
 
 typedef struct _LanczosScale      LanczosScale;
 typedef struct _LanczosScaleClass LanczosScaleClass;
+
+typedef struct
+{
+  GimpProcedureConfig *config;
+  gint                 width;
+  gint                 height;
+  gchar               *kernel;
+  gboolean             linear_light;
+} DialogDefaults;
 
 struct _LanczosScale
 {
@@ -469,6 +480,76 @@ create_quality_frame (GimpProcedureConfig *config)
   return frame;
 }
 
+static void
+hide_saved_settings_box (GtkWidget *dialog)
+{
+  GtkWidget *content_area;
+  GList     *children;
+
+  content_area = gtk_dialog_get_content_area (GTK_DIALOG (dialog));
+  children = gtk_container_get_children (GTK_CONTAINER (content_area));
+
+  for (GList *iter = children; iter; iter = g_list_next (iter))
+    {
+      if (GTK_IS_BUTTON_BOX (iter->data))
+        gtk_widget_hide (GTK_WIDGET (iter->data));
+    }
+
+  g_list_free (children);
+}
+
+static void
+make_reset_button_plain (GtkWidget *dialog)
+{
+  GtkWidget *button;
+  GtkWidget *child;
+  GtkWidget *label;
+
+  button = gtk_dialog_get_widget_for_response (GTK_DIALOG (dialog),
+                                               LANCZOS_RESPONSE_RESET);
+  if (! button || ! GTK_IS_BUTTON (button))
+    return;
+
+  child = gtk_bin_get_child (GTK_BIN (button));
+  if (child)
+    gtk_container_remove (GTK_CONTAINER (button), child);
+
+  label = gtk_label_new_with_mnemonic ("_Reset");
+  gtk_label_set_mnemonic_widget (GTK_LABEL (label), button);
+  gtk_container_add (GTK_CONTAINER (button), label);
+  gtk_widget_show (label);
+}
+
+static void
+reset_dialog_defaults (const DialogDefaults *defaults)
+{
+  g_object_set (defaults->config,
+                "new-width", defaults->width,
+                "new-height", defaults->height,
+                "size-unit", gimp_unit_pixel (),
+                "kernel", defaults->kernel,
+                "linear-light", defaults->linear_light,
+                NULL);
+}
+
+static gboolean
+run_clean_dialog (GtkWidget            *dialog,
+                  const DialogDefaults *defaults)
+{
+  while (TRUE)
+    {
+      gint response = gimp_dialog_run (GIMP_DIALOG (dialog));
+
+      if (response == LANCZOS_RESPONSE_RESET)
+        {
+          reset_dialog_defaults (defaults);
+          continue;
+        }
+
+      return response == GTK_RESPONSE_OK;
+    }
+}
+
 static gboolean
 run_dialog (GimpProcedure       *procedure,
             GimpProcedureConfig *config,
@@ -481,6 +562,7 @@ run_dialog (GimpProcedure       *procedure,
   GtkWidget *content_area;
   GtkWidget *size_frame;
   GtkWidget *quality_frame;
+  DialogDefaults defaults;
   gint       width;
   gint       height;
   gdouble    xres;
@@ -505,12 +587,28 @@ run_dialog (GimpProcedure       *procedure,
                 "new-width", width,
                 "new-height", height,
                 NULL);
+  g_object_get (config,
+                "kernel", &defaults.kernel,
+                "linear-light", &defaults.linear_light,
+                NULL);
+
+  defaults.config = config;
+  defaults.width = width;
+  defaults.height = height;
 
   dialog = gimp_procedure_dialog_new (procedure,
                                       config,
                                       "Lanczos Scale");
   gimp_procedure_dialog_set_ok_label (GIMP_PROCEDURE_DIALOG (dialog),
                                       "_Scale");
+  hide_saved_settings_box (dialog);
+  make_reset_button_plain (dialog);
+  gimp_dialog_set_alternative_button_order (GTK_DIALOG (dialog),
+                                            GTK_RESPONSE_HELP,
+                                            LANCZOS_RESPONSE_RESET,
+                                            GTK_RESPONSE_OK,
+                                            GTK_RESPONSE_CANCEL,
+                                            -1);
 
   coordinates = create_size_coordinates (config, width, height, xres, yres);
   size_frame = gimp_frame_new ("Image Size");
@@ -524,9 +622,10 @@ run_dialog (GimpProcedure       *procedure,
   quality_frame = create_quality_frame (config);
   gtk_box_pack_start (GTK_BOX (content_area), quality_frame, FALSE, FALSE, 0);
 
-  run = gimp_procedure_dialog_run (GIMP_PROCEDURE_DIALOG (dialog));
+  run = run_clean_dialog (dialog, &defaults);
 
   gtk_widget_destroy (dialog);
+  g_free (defaults.kernel);
 
   return run;
 }

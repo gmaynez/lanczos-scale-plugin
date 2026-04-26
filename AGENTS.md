@@ -115,6 +115,7 @@ Current dialog text intentionally follows GIMP's Scale Image style:
 - Kernel label: `Interpolation`
 - Choices: `Lanczos 3`, `Lanczos 2` in a combo box
 - OK button: `_Scale`
+- Bottom buttons: `_Help`, `_Reset`, `_Scale`, `_Cancel`; no saved-settings buttons.
 
 ## Gotchas
 
