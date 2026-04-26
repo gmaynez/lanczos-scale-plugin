@@ -216,8 +216,8 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
                                         "Scales the selected layer drawable and mask in place without changing the image canvas or other layers.",
                                         name);
       gimp_procedure_set_attribution (procedure,
-                                      "OpenAI Codex",
-                                      "OpenAI Codex",
+                                      "Lanczos Scale Contributors",
+                                      "Guillermo Garcia Maynez",
                                       "2026");
 
       gimp_procedure_add_choice_argument (procedure, "target",
