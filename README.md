@@ -67,7 +67,7 @@ For public releases, publish `generic` and optimized artifacts separately. A bin
 
 The CI workflow builds and tests the standalone resampler on Linux, macOS, Windows, x86_64, and ARM64 runner families, and builds the full GIMP plug-in on Windows/MSYS2 CLANG64.
 
-Tagging a release with a semver-style version tag such as `v1.2.3` runs the release workflow. It publishes Windows x86_64 plug-in zips for:
+Tagging a release with a version tag such as `v1.0` or `v1.2.3` runs the release workflow. It publishes Windows x86_64 plug-in zips for:
 
 - `lanczos-scale-windows-x86_64.zip`: portable generic build.
 - `lanczos-scale-windows-x86_64-v3.zip`: optimized x86-64-v3 build.

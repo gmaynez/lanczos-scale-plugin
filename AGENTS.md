@@ -25,7 +25,7 @@ This repository contains `Lanczos Scale`, an external GIMP 3 plug-in written in 
 - `tests/test-resample.c`: standalone resampler behavior tests.
 - `meson.build`, `meson_options.txt`: Meson build. The `plugin` feature can be enabled, disabled, or auto-detected.
 - `.github/workflows/ci.yml`: CI for standalone core tests across hosted OS/arch runners plus Windows/MSYS2 plug-in builds.
-- `.github/workflows/release.yml`: semver tag release packaging for Windows x86_64 generic and x86-64-v3 plug-in zips.
+- `.github/workflows/release.yml`: version-tag release packaging for Windows x86_64 generic and x86-64-v3 plug-in zips.
 - `README.md`: user-facing build/install notes.
 
 ## Known Local Environment
