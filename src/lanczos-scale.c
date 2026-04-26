@@ -32,15 +32,6 @@ typedef enum
 typedef struct _LanczosScale      LanczosScale;
 typedef struct _LanczosScaleClass LanczosScaleClass;
 
-typedef struct
-{
-  gdouble  ratio_width;
-  gdouble  ratio_height;
-  gdouble  last_width;
-  gdouble  last_height;
-  gboolean in_update;
-} AspectLockData;
-
 struct _LanczosScale
 {
   GimpPlugIn parent_instance;
@@ -62,7 +53,6 @@ static gboolean         lanczos_scale_set_i18n         (GimpPlugIn           *pl
                                                         const gchar          *procedure_name,
                                                         gchar               **gettext_domain,
                                                         gchar               **catalog_dir);
-static void             configure_aspect_lock          (GtkWidget            *coordinates);
 static GimpValueArray * lanczos_scale_run              (GimpProcedure        *procedure,
                                                         GimpRunMode           run_mode,
                                                         GimpImage            *image,
@@ -119,125 +109,6 @@ lanczos_scale_set_i18n (GimpPlugIn  *plug_in,
   return FALSE;
 }
 
-static gdouble
-round_dimension (gdouble value)
-{
-  if (value < 1.0)
-    return 1.0;
-  if (value > (gdouble) GIMP_MAX_IMAGE_SIZE)
-    return (gdouble) GIMP_MAX_IMAGE_SIZE;
-
-  return (gdouble) ((gint) (value + 0.5));
-}
-
-static void
-aspect_lock_capture (GimpSizeEntry  *entry,
-                     AspectLockData *data)
-{
-  data->ratio_width  = gimp_size_entry_get_refval (entry, 0);
-  data->ratio_height = gimp_size_entry_get_refval (entry, 1);
-  data->last_width   = data->ratio_width;
-  data->last_height  = data->ratio_height;
-}
-
-static void
-aspect_lock_chain_toggled (GimpChainButton *button,
-                           GimpSizeEntry   *entry)
-{
-  AspectLockData *data;
-
-  (void) button;
-
-  data = g_object_get_data (G_OBJECT (entry), "lanczos-aspect-lock");
-  if (data)
-    aspect_lock_capture (entry, data);
-}
-
-static void
-aspect_lock_refval_changed (GimpSizeEntry *entry,
-                            gpointer       user_data)
-{
-  AspectLockData *data = user_data;
-  GtkWidget      *chainbutton;
-  gdouble         width;
-  gdouble         height;
-  gboolean        width_changed;
-
-  if (! data || data->in_update)
-    return;
-
-  width  = gimp_size_entry_get_refval (entry, 0);
-  height = gimp_size_entry_get_refval (entry, 1);
-
-  chainbutton = g_object_get_data (G_OBJECT (entry), "chainbutton");
-  if (! chainbutton ||
-      ! gimp_chain_button_get_active (GIMP_CHAIN_BUTTON (chainbutton)) ||
-      data->ratio_width <= 0.0 ||
-      data->ratio_height <= 0.0)
-    {
-      data->last_width = width;
-      data->last_height = height;
-      return;
-    }
-
-  width_changed = (ABS (width - data->last_width) >=
-                   ABS (height - data->last_height));
-
-  data->in_update = TRUE;
-
-  if (width_changed)
-    {
-      height = round_dimension (width * data->ratio_height /
-                                data->ratio_width);
-      gimp_size_entry_set_refval (entry, 1, height);
-    }
-  else
-    {
-      width = round_dimension (height * data->ratio_width /
-                               data->ratio_height);
-      gimp_size_entry_set_refval (entry, 0, width);
-    }
-
-  data->in_update = FALSE;
-  data->last_width = gimp_size_entry_get_refval (entry, 0);
-  data->last_height = gimp_size_entry_get_refval (entry, 1);
-}
-
-static void
-configure_aspect_lock (GtkWidget *coordinates)
-{
-  AspectLockData *data;
-  GtkWidget      *chainbutton;
-
-  if (! GIMP_IS_SIZE_ENTRY (coordinates))
-    return;
-
-  data = g_new0 (AspectLockData, 1);
-  aspect_lock_capture (GIMP_SIZE_ENTRY (coordinates), data);
-
-  g_object_set_data_full (G_OBJECT (coordinates),
-                          "lanczos-aspect-lock",
-                          data,
-                          g_free);
-
-  chainbutton = g_object_get_data (G_OBJECT (coordinates), "chainbutton");
-  if (! chainbutton)
-    return;
-
-  g_object_set_data (G_OBJECT (chainbutton),
-                     "constrains-ratio",
-                     GINT_TO_POINTER (TRUE));
-
-  g_signal_connect (chainbutton, "toggled",
-                    G_CALLBACK (aspect_lock_chain_toggled),
-                    coordinates);
-  g_signal_connect_after (coordinates, "refval-changed",
-                          G_CALLBACK (aspect_lock_refval_changed),
-                          data);
-
-  gimp_chain_button_set_active (GIMP_CHAIN_BUTTON (chainbutton), TRUE);
-}
-
 static GimpProcedure *
 lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
                                 const gchar *name)
@@ -255,13 +126,13 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
 
       gimp_procedure_set_image_types (procedure, "RGB*, GRAY*");
       gimp_procedure_set_sensitivity_mask (procedure,
-                                           GIMP_PROCEDURE_SENSITIVE_DRAWABLE |
-                                           GIMP_PROCEDURE_SENSITIVE_NO_DRAWABLES);
+                                           GIMP_PROCEDURE_SENSITIVE_DRAWABLE);
       gimp_procedure_set_menu_label (procedure, "_Lanczos Scale...");
       gimp_procedure_add_menu_path (procedure, "<Image>/Image/[Scale]");
+      gimp_procedure_add_menu_path (procedure, "<Image>/Layer/[Scale]");
       gimp_procedure_set_documentation (procedure,
-                                        "Scale a drawable or visible image with a custom Lanczos resampler",
-                                        "Scales the selected layer drawable or the visible image projection using a separable Lanczos2 or Lanczos3 filter.",
+                                        "Scale the selected layer with a custom Lanczos resampler",
+                                        "Scales the selected layer drawable in place using a separable Lanczos2 or Lanczos3 filter.",
                                         PLUG_IN_PROC);
       gimp_procedure_set_attribution (procedure,
                                       "OpenAI Codex",
@@ -311,7 +182,7 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
                                                                        "replace-drawable", OUTPUT_REPLACE_DRAWABLE, "Replace drawable", NULL,
                                                                        "new-image",        OUTPUT_NEW_IMAGE,        "New image",        NULL,
                                                                        NULL),
-                                          "new-layer",
+                                          "replace-drawable",
                                           G_PARAM_READWRITE);
 
       gimp_procedure_add_boolean_argument (procedure, "linear-light",
@@ -508,6 +379,96 @@ copy_source_buffer (GimpDrawable *drawable,
   return copy;
 }
 
+static GtkWidget *
+create_size_coordinates (GimpProcedureConfig *config,
+                         gint                 width,
+                         gint                 height,
+                         gdouble              xres,
+                         gdouble              yres)
+{
+  GtkWidget *coordinates;
+  GtkWidget *chainbutton;
+
+  coordinates = gimp_coordinates_new (gimp_unit_pixel (),
+                                      "%a",
+                                      TRUE,
+                                      TRUE,
+                                      10,
+                                      GIMP_SIZE_ENTRY_UPDATE_SIZE,
+                                      TRUE,
+                                      TRUE,
+                                      "_Width:",
+                                      width,
+                                      xres,
+                                      1.0,
+                                      GIMP_MAX_IMAGE_SIZE,
+                                      0.0,
+                                      width,
+                                      "_Height:",
+                                      height,
+                                      yres,
+                                      1.0,
+                                      GIMP_MAX_IMAGE_SIZE,
+                                      0.0,
+                                      height);
+
+  chainbutton = GIMP_COORDINATES_CHAINBUTTON (GIMP_SIZE_ENTRY (coordinates));
+  g_object_set_data (G_OBJECT (chainbutton),
+                     "constrains-ratio",
+                     GINT_TO_POINTER (TRUE));
+
+  gimp_prop_coordinates_connect (G_OBJECT (config),
+                                 "new-width",
+                                 "new-height",
+                                 "size-unit",
+                                 coordinates,
+                                 NULL,
+                                 xres,
+                                 yres);
+
+  return coordinates;
+}
+
+static GtkWidget *
+create_quality_frame (GimpProcedureConfig *config)
+{
+  GtkWidget *frame;
+  GtkWidget *grid;
+  GtkWidget *label;
+  GtkWidget *combo;
+  GtkWidget *linear_light;
+
+  frame = gimp_frame_new ("Quality");
+  grid = gtk_grid_new ();
+  gtk_grid_set_row_spacing (GTK_GRID (grid), 6);
+  gtk_grid_set_column_spacing (GTK_GRID (grid), 8);
+
+  label = gtk_label_new_with_mnemonic ("Interpolation:");
+  gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+
+  combo = gimp_prop_choice_combo_box_new (G_OBJECT (config), "kernel");
+  gtk_widget_set_hexpand (combo, TRUE);
+  gtk_label_set_mnemonic_widget (GTK_LABEL (label), combo);
+
+  linear_light = gimp_prop_check_button_new (G_OBJECT (config),
+                                             "linear-light",
+                                             "Linear light");
+
+  gtk_grid_attach (GTK_GRID (grid), label, 0, 0, 1, 1);
+  gtk_grid_attach (GTK_GRID (grid), combo, 1, 0, 1, 1);
+  gtk_grid_attach (GTK_GRID (grid), linear_light, 1, 1, 1, 1);
+
+  gtk_container_add (GTK_CONTAINER (frame), grid);
+
+  gtk_widget_show (label);
+  gtk_widget_show (combo);
+  gtk_widget_show (linear_light);
+  gtk_widget_show (grid);
+  gtk_widget_show (frame);
+
+  return frame;
+}
+
 static gboolean
 run_dialog (GimpProcedure       *procedure,
             GimpProcedureConfig *config,
@@ -517,6 +478,9 @@ run_dialog (GimpProcedure       *procedure,
 {
   GtkWidget *dialog;
   GtkWidget *coordinates;
+  GtkWidget *content_area;
+  GtkWidget *size_frame;
+  GtkWidget *quality_frame;
   gint       width;
   gint       height;
   gdouble    xres;
@@ -525,26 +489,16 @@ run_dialog (GimpProcedure       *procedure,
 
   gimp_ui_init (PLUG_IN_BINARY);
 
-  if (has_drawable)
-    {
-      width = gimp_drawable_get_width (drawable);
-      height = gimp_drawable_get_height (drawable);
+  if (! has_drawable)
+    return FALSE;
 
-      g_object_set (config,
-                    "target", "selected-drawable",
-                    "output-mode", "new-layer",
-                    NULL);
-    }
-  else
-    {
-      width = gimp_image_get_width (image);
-      height = gimp_image_get_height (image);
+  width = gimp_drawable_get_width (drawable);
+  height = gimp_drawable_get_height (drawable);
 
-      g_object_set (config,
-                    "target", "visible-image",
-                    "output-mode", "new-image",
-                    NULL);
-    }
+  g_object_set (config,
+                "target", "selected-drawable",
+                "output-mode", "replace-drawable",
+                NULL);
 
   gimp_image_get_resolution (image, &xres, &yres);
   g_object_set (config,
@@ -558,37 +512,17 @@ run_dialog (GimpProcedure       *procedure,
   gimp_procedure_dialog_set_ok_label (GIMP_PROCEDURE_DIALOG (dialog),
                                       "_Scale");
 
-  gimp_procedure_dialog_get_label (GIMP_PROCEDURE_DIALOG (dialog),
-                                   "size-label",
-                                   "Image Size",
-                                   FALSE,
-                                   FALSE);
+  coordinates = create_size_coordinates (config, width, height, xres, yres);
+  size_frame = gimp_frame_new ("Image Size");
+  gtk_container_add (GTK_CONTAINER (size_frame), coordinates);
+  gtk_widget_show (coordinates);
+  gtk_widget_show (size_frame);
 
-  coordinates = gimp_procedure_dialog_get_coordinates (GIMP_PROCEDURE_DIALOG (dialog),
-                                                       "coordinates",
-                                                       "new-width",
-                                                       "new-height",
-                                                       "size-unit",
-                                                       "%a",
-                                                       GIMP_SIZE_ENTRY_UPDATE_SIZE,
-                                                       xres,
-                                                       yres);
-  configure_aspect_lock (coordinates);
+  content_area = gtk_dialog_get_content_area (GTK_DIALOG (dialog));
+  gtk_box_pack_start (GTK_BOX (content_area), size_frame, FALSE, FALSE, 0);
 
-  gimp_procedure_dialog_fill_frame (GIMP_PROCEDURE_DIALOG (dialog),
-                                    "size-frame",
-                                    "size-label",
-                                    FALSE,
-                                    "coordinates");
-
-  gimp_procedure_dialog_fill (GIMP_PROCEDURE_DIALOG (dialog),
-                              "target",
-                              "size-frame",
-                              "kernel",
-                              "output-mode",
-                              "linear-light",
-                              "name",
-                              NULL);
+  quality_frame = create_quality_frame (config);
+  gtk_box_pack_start (GTK_BOX (content_area), quality_frame, FALSE, FALSE, 0);
 
   run = gimp_procedure_dialog_run (GIMP_PROCEDURE_DIALOG (dialog));
 
@@ -841,6 +775,20 @@ lanczos_scale_run (GimpProcedure        *procedure,
           goto execution_error;
         }
 
+      if (! gimp_layer_set_offsets (GIMP_LAYER (source_drawable), 0, 0))
+        {
+          g_set_error_literal (&error, GIMP_PLUG_IN_ERROR, 0,
+                               "Could not move selected layer to the image origin.");
+          goto execution_error;
+        }
+
+      if (! gimp_image_resize (image, dst_width, dst_height, 0, 0))
+        {
+          g_set_error_literal (&error, GIMP_PLUG_IN_ERROR, 0,
+                               "Could not resize image canvas.");
+          goto execution_error;
+        }
+
       output_layer = GIMP_LAYER (source_drawable);
       dst_buffer = gimp_drawable_get_buffer (source_drawable);
     }
@@ -886,8 +834,6 @@ lanczos_scale_run (GimpProcedure        *procedure,
   if (dst_buffer)
     g_object_unref (dst_buffer);
 
-  delete_failed_output (output_mode, output_image, output_layer);
-
   if (visible_layer)
     gimp_item_delete (GIMP_ITEM (visible_layer));
 
@@ -907,6 +853,8 @@ execution_error:
     g_object_unref (src_buffer);
   if (dst_buffer)
     g_object_unref (dst_buffer);
+
+  delete_failed_output (output_mode, output_image, output_layer);
 
   if (visible_layer)
     gimp_item_delete (GIMP_ITEM (visible_layer));
