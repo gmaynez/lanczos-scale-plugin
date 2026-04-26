@@ -4,9 +4,9 @@
 
 typedef struct
 {
-  int    row;
-  guint  used_at;
-  float *pixels;
+  int     row;
+  guint64 used_at;
+  float  *pixels;
 } RowCacheSlot;
 
 static void
@@ -15,6 +15,18 @@ set_error (GError      **error,
 {
   if (error)
     g_set_error_literal (error, GIMP_PLUG_IN_ERROR, 0, message);
+}
+
+static gboolean
+mul_gsize_overflows (gsize  a,
+                     gsize  b,
+                     gsize *result)
+{
+  if (a != 0 && b > ((gsize) -1) / a)
+    return TRUE;
+
+  *result = a * b;
+  return FALSE;
 }
 
 gboolean
@@ -153,9 +165,11 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
   RowCacheSlot        *cache = NULL;
   float               *src_row = NULL;
   float               *dst_row = NULL;
+  gsize                src_row_values = 0;
+  gsize                dst_row_values = 0;
   int                  cache_size = 0;
   int                  dy;
-  guint                use_counter = 1;
+  guint64              use_counter = 1;
 
   g_return_val_if_fail (src_buffer != NULL, FALSE);
   g_return_val_if_fail (dst_buffer != NULL, FALSE);
@@ -195,17 +209,36 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
     }
 
   cache_size = MAX (1, y_table->max_taps + 2);
-  cache = g_new0 (RowCacheSlot, cache_size);
-  src_row = g_new (float, (size_t) src_width *
-                          (size_t) format_info->channels);
-  dst_row = g_new (float, (size_t) dst_width *
-                          (size_t) format_info->channels);
+  if (mul_gsize_overflows ((gsize) src_width,
+                           (gsize) format_info->channels,
+                           &src_row_values) ||
+      mul_gsize_overflows ((gsize) dst_width,
+                           (gsize) format_info->channels,
+                           &dst_row_values))
+    {
+      set_error (error, "Image dimensions are too large.");
+      goto fail;
+    }
+
+  cache = g_try_new0 (RowCacheSlot, (gsize) cache_size);
+  src_row = g_try_new (float, src_row_values);
+  dst_row = g_try_new (float, dst_row_values);
+
+  if (! cache || ! src_row || ! dst_row)
+    {
+      set_error (error, "Could not allocate row buffers.");
+      goto fail;
+    }
 
   for (int i = 0; i < cache_size; i++)
     {
       cache[i].row = -1;
-      cache[i].pixels = g_new (float, (size_t) dst_width *
-                                      (size_t) format_info->channels);
+      cache[i].pixels = g_try_new (float, dst_row_values);
+      if (! cache[i].pixels)
+        {
+          set_error (error, "Could not allocate row cache.");
+          goto fail;
+        }
     }
 
   for (dy = 0; dy < dst_height; dy++)
@@ -258,33 +291,11 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
                 accum[c] += (double) pixel[c] * y_contrib->weights[i];
             }
 
-          if (format_info->alpha_channel >= 0)
-            {
-              double alpha = accum[format_info->alpha_channel];
-
-              for (int c = 0; c < format_info->channels; c++)
-                {
-                  double value = accum[c];
-
-                  if (c != format_info->alpha_channel)
-                    value = (alpha > 1.0e-6) ? value / alpha : 0.0;
-                  else if (value < 0.0)
-                    value = 0.0;
-                  else if (value > 1.0)
-                    value = 1.0;
-
-                  dst_row[((size_t) dx *
-                           (size_t) format_info->channels) + (size_t) c] =
-                    (float) value;
-                }
-            }
-          else
-            {
-              for (int c = 0; c < format_info->channels; c++)
-                dst_row[((size_t) dx *
-                         (size_t) format_info->channels) + (size_t) c] =
-                  (float) accum[c];
-            }
+          lanczos_resample_store_pixel (accum,
+                                        dst_row + ((size_t) dx *
+                                                   (size_t) format_info->channels),
+                                        format_info->channels,
+                                        format_info->alpha_channel);
         }
 
       gegl_buffer_set (dst_buffer,

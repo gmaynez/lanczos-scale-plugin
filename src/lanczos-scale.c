@@ -409,6 +409,21 @@ copy_image_metadata (GimpImage *src,
   return TRUE;
 }
 
+static void
+delete_failed_output (OutputMode  output_mode,
+                      GimpImage  *output_image,
+                      GimpLayer  *output_layer)
+{
+  if (output_image)
+    {
+      gimp_image_delete (output_image);
+      return;
+    }
+
+  if (output_mode == OUTPUT_NEW_LAYER && output_layer)
+    gimp_item_delete (GIMP_ITEM (output_layer));
+}
+
 static GimpLayer *
 insert_layer_near_source (GimpImage    *image,
                           GimpLayer    *layer,
@@ -870,6 +885,8 @@ lanczos_scale_run (GimpProcedure        *procedure,
     g_object_unref (src_buffer);
   if (dst_buffer)
     g_object_unref (dst_buffer);
+
+  delete_failed_output (output_mode, output_image, output_layer);
 
   if (visible_layer)
     gimp_item_delete (GIMP_ITEM (visible_layer));

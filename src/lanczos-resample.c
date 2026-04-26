@@ -34,6 +34,16 @@ mul_size_overflows (size_t a,
   return false;
 }
 
+static double
+clamp_unit_double (double value)
+{
+  if (value < 0.0)
+    return 0.0;
+  if (value > 1.0)
+    return 1.0;
+  return value;
+}
+
 double
 lanczos_sinc (double x)
 {
@@ -120,8 +130,19 @@ lanczos_contrib_table_new (int           src_size,
   table->dst_size = dst_size;
   table->kernel   = kernel;
 
-  table->items = (LanczosContribution *) calloc ((size_t) dst_size,
-                                                 sizeof (*table->items));
+  {
+    size_t items_bytes;
+
+    if (mul_size_overflows ((size_t) dst_size, sizeof (*table->items),
+                            &items_bytes))
+      {
+        lanczos_contrib_table_free (table);
+        return NULL;
+      }
+
+    table->items = (LanczosContribution *) calloc (1, items_bytes);
+  }
+
   if (! table->items)
     {
       lanczos_contrib_table_free (table);
@@ -151,13 +172,34 @@ lanczos_contrib_table_new (int           src_size,
       if (taps < 1)
         taps = 1;
 
+      if ((size_t) taps > ((size_t) -1) - total_taps)
+        {
+          lanczos_contrib_table_free (table);
+          return NULL;
+        }
+
       total_taps += (size_t) taps;
       if (taps > max_taps)
         max_taps = taps;
     }
 
-  table->pixels = (int *) malloc (total_taps * sizeof (*table->pixels));
-  table->weights = (double *) malloc (total_taps * sizeof (*table->weights));
+  {
+    size_t pixels_bytes;
+    size_t weights_bytes;
+
+    if (mul_size_overflows (total_taps, sizeof (*table->pixels),
+                            &pixels_bytes) ||
+        mul_size_overflows (total_taps, sizeof (*table->weights),
+                            &weights_bytes))
+      {
+        lanczos_contrib_table_free (table);
+        return NULL;
+      }
+
+    table->pixels = (int *) malloc (pixels_bytes);
+    table->weights = (double *) malloc (weights_bytes);
+  }
+
   if (! table->pixels || ! table->weights)
     {
       lanczos_contrib_table_free (table);
@@ -278,6 +320,46 @@ lanczos_resample_horizontal_row (const float                *src_row,
     }
 }
 
+void
+lanczos_resample_store_pixel (const double *accum,
+                              float        *dst_pixel,
+                              int           channels,
+                              int           alpha_channel)
+{
+  int c;
+
+  if (alpha_channel >= 0)
+    {
+      double alpha = accum[alpha_channel];
+
+      for (c = 0; c < channels; c++)
+        {
+          double value;
+
+          if (c == alpha_channel)
+            {
+              value = clamp_unit_double (alpha);
+            }
+          else if (alpha > LANCZOS_ALPHA_EPSILON)
+            {
+              /* Keep straight-alpha output bounded after Lanczos ringing. */
+              value = clamp_unit_double (accum[c] / alpha);
+            }
+          else
+            {
+              value = 0.0;
+            }
+
+          dst_pixel[c] = (float) value;
+        }
+    }
+  else
+    {
+      for (c = 0; c < channels; c++)
+        dst_pixel[c] = (float) accum[c];
+    }
+}
+
 bool
 lanczos_resample_float (const float         *src,
                         int                  src_width,
@@ -386,32 +468,11 @@ lanczos_resample_float (const float         *src,
                 accum[c] += (double) tmp_px[c] * contrib->weights[i];
             }
 
-          if (alpha_channel >= 0)
-            {
-              double alpha = accum[alpha_channel];
-
-              for (c = 0; c < channels; c++)
-                {
-                  double value = accum[c];
-
-                  if (c != alpha_channel)
-                    value = (alpha > LANCZOS_ALPHA_EPSILON) ?
-                            value / alpha : 0.0;
-                  else if (value < 0.0)
-                    value = 0.0;
-                  else if (value > 1.0)
-                    value = 1.0;
-
-                  dst_row[((size_t) x * (size_t) channels) + (size_t) c] =
-                    (float) value;
-                }
-            }
-          else
-            {
-              for (c = 0; c < channels; c++)
-                dst_row[((size_t) x * (size_t) channels) + (size_t) c] =
-                  (float) accum[c];
-            }
+          lanczos_resample_store_pixel (accum,
+                                        dst_row + ((size_t) x *
+                                                   (size_t) channels),
+                                        channels,
+                                        alpha_channel);
         }
 
       if (progress)

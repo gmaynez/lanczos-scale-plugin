@@ -49,6 +49,11 @@ void                  lanczos_resample_horizontal_row (const float           *sr
                                                        int                    alpha_channel,
                                                        const LanczosContribTable *x_table);
 
+void                  lanczos_resample_store_pixel    (const double          *accum,
+                                                       float                 *dst_pixel,
+                                                       int                    channels,
+                                                       int                    alpha_channel);
+
 bool                  lanczos_resample_float          (const float           *src,
                                                        int                    src_width,
                                                        int                    src_height,
