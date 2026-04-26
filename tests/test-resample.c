@@ -152,6 +152,37 @@ test_constant_rgba_downscale (void)
 }
 
 static void
+test_kaiser4_constant_rgba_downscale (void)
+{
+  float src[13 * 9 * 4];
+  float dst[4 * 5 * 4] = { 0.0f };
+  int   ok;
+
+  for (int i = 0; i < 13 * 9; i++)
+    {
+      src[i * 4 + 0] = 0.1f;
+      src[i * 4 + 1] = 0.3f;
+      src[i * 4 + 2] = 0.8f;
+      src[i * 4 + 3] = 0.6f;
+    }
+
+  ok = lanczos_resample_float (src, 13, 9, 4, 3,
+                               dst, 4, 5,
+                               LANCZOS_KERNEL_KAISER_4,
+                               NULL, NULL);
+
+  expect_true ("kaiser4 constant rgba downscale ok", ok);
+
+  for (int i = 0; i < 4 * 5; i++)
+    {
+      expect_near ("kaiser4 constant red",   dst[i * 4 + 0], 0.1f, 1.0e-5f);
+      expect_near ("kaiser4 constant green", dst[i * 4 + 1], 0.3f, 1.0e-5f);
+      expect_near ("kaiser4 constant blue",  dst[i * 4 + 2], 0.8f, 1.0e-5f);
+      expect_near ("kaiser4 constant alpha", dst[i * 4 + 3], 0.6f, 1.0e-5f);
+    }
+}
+
+static void
 test_alpha_ringing_stays_bounded (void)
 {
   const float src[] =
@@ -196,6 +227,7 @@ main (void)
   test_gray_downscale ();
   test_alpha_premultiply ();
   test_constant_rgba_downscale ();
+  test_kaiser4_constant_rgba_downscale ();
   test_alpha_ringing_stays_bounded ();
   test_invalid_kernel_rejected ();
 

@@ -23,8 +23,10 @@ extern "C" {
 
 typedef enum
 {
-  LANCZOS_KERNEL_2 = 2,
-  LANCZOS_KERNEL_3 = 3,
+  LANCZOS_KERNEL_2        = 2,
+  LANCZOS_KERNEL_3        = 3,
+  LANCZOS_KERNEL_KAISER_3 = 103,
+  LANCZOS_KERNEL_KAISER_4 = 104,
 } LanczosKernel;
 
 typedef struct
@@ -49,6 +51,8 @@ typedef void (*LanczosProgressFunc) (double fraction,
                                      void  *data);
 
 double                lanczos_sinc                    (double                 x);
+bool                  lanczos_kernel_is_valid         (LanczosKernel          kernel);
+int                   lanczos_kernel_radius           (LanczosKernel          kernel);
 double                lanczos_kernel_value            (double                 x,
                                                        LanczosKernel          kernel);
 

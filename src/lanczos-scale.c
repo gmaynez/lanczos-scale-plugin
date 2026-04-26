@@ -150,6 +150,10 @@ lanczos_scale_create_kernel_choice (void)
                                       "Lanczos 3", NULL,
                                       "lanczos2", LANCZOS_KERNEL_2,
                                       "Lanczos 2", NULL,
+                                      "kaiser3", LANCZOS_KERNEL_KAISER_3,
+                                      "Kaiser-Sinc 3", NULL,
+                                      "kaiser4", LANCZOS_KERNEL_KAISER_4,
+                                      "Kaiser-Sinc 4", NULL,
                                       NULL);
 }
 
@@ -209,10 +213,10 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
                                     "<Image>/Layer/[Scale]");
       gimp_procedure_set_documentation (procedure,
                                         image_procedure ?
-                                        "Scale the image with a custom Lanczos resampler" :
-                                        "Scale the selected layer with a custom Lanczos resampler",
+                                        "Scale the image with a custom windowed-sinc resampler" :
+                                        "Scale the selected layer with a custom windowed-sinc resampler",
                                         image_procedure ?
-                                        "Scales the image canvas, layers, layer masks, channels, and selection in place using a separable Lanczos2 or Lanczos3 filter." :
+                                        "Scales the image canvas, layers, layer masks, channels, and selection in place using a separable windowed-sinc filter." :
                                         "Scales the selected layer drawable and mask in place without changing the image canvas or other layers.",
                                         name);
       gimp_procedure_set_attribution (procedure,
@@ -247,7 +251,7 @@ lanczos_scale_create_procedure (GimpPlugIn  *plug_in,
 
       gimp_procedure_add_choice_argument (procedure, "kernel",
                                           "Interpolation",
-                                          "Lanczos kernel radius",
+                                          "Windowed-sinc interpolation filter",
                                           lanczos_scale_create_kernel_choice (),
                                           "lanczos3",
                                           G_PARAM_READWRITE);

@@ -11,6 +11,8 @@
 #endif
 
 #define LANCZOS_ALPHA_EPSILON 1.0e-6
+#define LANCZOS_KAISER_3_BETA 6.5
+#define LANCZOS_KAISER_4_BETA 8.0
 
 static int
 clamp_int (int value,
@@ -55,15 +57,101 @@ lanczos_sinc (double x)
   return sin (M_PI * x) / (M_PI * x);
 }
 
+bool
+lanczos_kernel_is_valid (LanczosKernel kernel)
+{
+  return lanczos_kernel_radius (kernel) > 0;
+}
+
+int
+lanczos_kernel_radius (LanczosKernel kernel)
+{
+  switch (kernel)
+    {
+    case LANCZOS_KERNEL_2:
+      return 2;
+
+    case LANCZOS_KERNEL_3:
+    case LANCZOS_KERNEL_KAISER_3:
+      return 3;
+
+    case LANCZOS_KERNEL_KAISER_4:
+      return 4;
+    }
+
+  return 0;
+}
+
+static double
+lanczos_bessel_i0 (double x)
+{
+  double half_x = x * 0.5;
+  double term = 1.0;
+  double sum = 1.0;
+
+  for (int k = 1; k <= 50; k++)
+    {
+      double ratio = half_x / (double) k;
+
+      term *= ratio * ratio;
+      sum += term;
+
+      if (term <= sum * 1.0e-15)
+        break;
+    }
+
+  return sum;
+}
+
+static double
+lanczos_kaiser_beta (LanczosKernel kernel)
+{
+  switch (kernel)
+    {
+    case LANCZOS_KERNEL_KAISER_3:
+      return LANCZOS_KAISER_3_BETA;
+
+    case LANCZOS_KERNEL_KAISER_4:
+      return LANCZOS_KAISER_4_BETA;
+
+    case LANCZOS_KERNEL_2:
+    case LANCZOS_KERNEL_3:
+      break;
+    }
+
+  return 0.0;
+}
+
+static double
+lanczos_kaiser_window (double x,
+                       double radius,
+                       double beta)
+{
+  double ratio = fabs (x) / radius;
+  double shape;
+
+  if (ratio >= 1.0)
+    return 0.0;
+
+  shape = sqrt (1.0 - (ratio * ratio));
+
+  return lanczos_bessel_i0 (beta * shape) / lanczos_bessel_i0 (beta);
+}
+
 double
 lanczos_kernel_value (double        x,
                       LanczosKernel kernel)
 {
-  double radius = (double) kernel;
+  double radius = (double) lanczos_kernel_radius (kernel);
   double ax     = fabs (x);
+  double beta;
 
-  if (ax >= radius)
+  if (radius <= 0.0 || ax >= radius)
     return 0.0;
+
+  beta = lanczos_kaiser_beta (kernel);
+  if (beta > 0.0)
+    return lanczos_sinc (x) * lanczos_kaiser_window (x, radius, beta);
 
   return lanczos_sinc (x) * lanczos_sinc (x / radius);
 }
@@ -121,7 +209,7 @@ lanczos_contrib_table_new (int           src_size,
   int                  dst;
 
   if (src_size <= 0 || dst_size <= 0 ||
-      (kernel != LANCZOS_KERNEL_2 && kernel != LANCZOS_KERNEL_3))
+      ! lanczos_kernel_is_valid (kernel))
     return NULL;
 
   table = (LanczosContribTable *) calloc (1, sizeof (*table));
@@ -161,7 +249,7 @@ lanczos_contrib_table_new (int           src_size,
       int    unique_high;
       int    taps;
 
-      contrib_bounds (src_size, dst_size, dst, (int) kernel,
+      contrib_bounds (src_size, dst_size, dst, lanczos_kernel_radius (kernel),
                       &raw_start, &raw_end,
                       &unique_low, &unique_high,
                       &center, &filter_scale);
@@ -226,7 +314,7 @@ lanczos_contrib_table_new (int           src_size,
         int                  taps;
         int                  i;
 
-        contrib_bounds (src_size, dst_size, dst, (int) kernel,
+        contrib_bounds (src_size, dst_size, dst, lanczos_kernel_radius (kernel),
                         &raw_start, &raw_end,
                         &unique_low, &unique_high,
                         &center, &filter_scale);

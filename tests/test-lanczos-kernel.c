@@ -86,6 +86,17 @@ main (void)
   expect_near ("kernel cutoff", lanczos_kernel_value (3.0, LANCZOS_KERNEL_3), 0.0, 1.0e-12);
   expect_near ("kernel outside", lanczos_kernel_value (3.1, LANCZOS_KERNEL_3), 0.0, 1.0e-12);
   expect_near ("lanczos2 cutoff", lanczos_kernel_value (2.0, LANCZOS_KERNEL_2), 0.0, 1.0e-12);
+  expect_true ("kaiser3 valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_KAISER_3));
+  expect_true ("kaiser4 valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_KAISER_4));
+  expect_true ("invalid kernel not valid", ! lanczos_kernel_is_valid ((LanczosKernel) 4));
+  expect_true ("kaiser3 radius", lanczos_kernel_radius (LANCZOS_KERNEL_KAISER_3) == 3);
+  expect_true ("kaiser4 radius", lanczos_kernel_radius (LANCZOS_KERNEL_KAISER_4) == 4);
+  expect_near ("kaiser3 center", lanczos_kernel_value (0.0, LANCZOS_KERNEL_KAISER_3), 1.0, 1.0e-12);
+  expect_near ("kaiser3 cutoff", lanczos_kernel_value (3.0, LANCZOS_KERNEL_KAISER_3), 0.0, 1.0e-12);
+  expect_near ("kaiser4 cutoff", lanczos_kernel_value (4.0, LANCZOS_KERNEL_KAISER_4), 0.0, 1.0e-12);
+  expect_true ("kaiser3 half finite positive",
+               isfinite (lanczos_kernel_value (0.5, LANCZOS_KERNEL_KAISER_3)) &&
+               lanczos_kernel_value (0.5, LANCZOS_KERNEL_KAISER_3) > 0.0);
 
   table = lanczos_contrib_table_new (7, 11, LANCZOS_KERNEL_3);
   expect_true ("table allocated", table != NULL);
@@ -114,9 +125,17 @@ main (void)
   expect_table_normalized ("lanczos3 downscale table", 41, 9, LANCZOS_KERNEL_3);
   expect_table_normalized ("lanczos2 upscale table", 9, 17, LANCZOS_KERNEL_2);
   expect_table_normalized ("lanczos2 downscale table", 41, 9, LANCZOS_KERNEL_2);
+  expect_table_normalized ("kaiser3 upscale table", 9, 17, LANCZOS_KERNEL_KAISER_3);
+  expect_table_normalized ("kaiser3 downscale table", 41, 9, LANCZOS_KERNEL_KAISER_3);
+  expect_table_normalized ("kaiser4 upscale table", 9, 17, LANCZOS_KERNEL_KAISER_4);
+  expect_table_normalized ("kaiser4 downscale table", 41, 9, LANCZOS_KERNEL_KAISER_4);
 
   table = lanczos_contrib_table_new (100, 10, LANCZOS_KERNEL_3);
   expect_true ("downscale support expands", table != NULL && table->max_taps >= 55);
+  lanczos_contrib_table_free (table);
+
+  table = lanczos_contrib_table_new (100, 10, LANCZOS_KERNEL_KAISER_4);
+  expect_true ("kaiser4 downscale support expands", table != NULL && table->max_taps >= 75);
   lanczos_contrib_table_free (table);
 
   expect_true ("bad source size rejected",
