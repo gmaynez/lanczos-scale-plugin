@@ -17,18 +17,8 @@ concurrency:
 
 jobs:
   windows:
-    name: Package Windows (${{ matrix.cpu-baseline }})
+    name: Package Windows (x86-64-v2)
     runs-on: windows-2025
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - cpu-baseline: generic
-            artifact: lanczos-scale-windows-x86_64
-            note: Portable Windows build with no extra x86_64 ISA requirement.
-          - cpu-baseline: x86-64-v3
-            artifact: lanczos-scale-windows-x86_64-v3
-            note: Optimized Windows build for modern x86_64 CPUs with AVX2/FMA/BMI-class support.
 
     defaults:
       run:
@@ -57,7 +47,7 @@ jobs:
         run: >
           meson setup build-release
           -Dplugin=enabled
-          -Dcpu-baseline=${{ matrix.cpu-baseline }}
+          -Dcpu-baseline=x86-64-v2
           --buildtype=release
           -Db_lto=true
 
@@ -70,7 +60,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $package = "dist/${{ matrix.artifact }}"
+          $package = "dist/lanczos-scale-windows-x86_64"
           New-Item -ItemType Directory -Force -Path "$package/lanczos-scale" | Out-Null
           Copy-Item -LiteralPath "build-release/lanczos-scale.exe" -Destination "$package/lanczos-scale/lanczos-scale.exe" -Force
           Copy-Item -LiteralPath "README.md" -Destination "$package/README.md" -Force
@@ -89,12 +79,11 @@ jobs:
           %APPDATA%\GIMP\3.2\plug-ins\lanczos-scale\lanczos-scale.exe
 
           The folder basename and executable basename must both be lanczos-scale.
-          Use lanczos-scale-windows-x86_64.zip by default. Use the v3 zip only on CPUs that support AVX2/FMA/BMI-class instructions.
           "@
           Set-Content -LiteralPath "$package/INSTALL-WINDOWS.txt" -Value $installInfo -Encoding UTF8
           $baselineInfo = @"
-          CPU baseline: ${{ matrix.cpu-baseline }}
-          ${{ matrix.note }}
+          CPU baseline: x86-64-v2
+          Optimized Windows build targeting x86-64-v2 (SSE3/SSSE3/SSE4.1/SSE4.2/POPCNT).
 
           Install by copying the lanczos-scale directory into the GIMP 3 plug-ins directory:
           %APPDATA%\GIMP\3.2\plug-ins
@@ -102,12 +91,12 @@ jobs:
           The directory basename and executable basename must both be lanczos-scale.
           "@
           Set-Content -LiteralPath "$package/CPU-BASELINE.txt" -Value $baselineInfo -Encoding UTF8
-          Compress-Archive -Path "$package/*" -DestinationPath "dist/${{ matrix.artifact }}.zip" -Force
+          Compress-Archive -Path "$package/*" -DestinationPath "dist/lanczos-scale-windows-x86_64.zip" -Force
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}.zip
+          name: lanczos-scale-windows-x86_64
+          path: dist/lanczos-scale-windows-x86_64.zip
 
   publish:
     name: Publish GitHub release
@@ -130,7 +119,7 @@ jobs:
           body: |
             ## Windows install
 
-            Download `lanczos-scale-windows-x86_64.zip` unless you specifically want the optimized x86-64-v3 build and your CPU supports it. Close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
+            Download `lanczos-scale-windows-x86_64.zip`. This build targets x86-64-v2 (SSE3/SSSE3/SSE4.1/SSE4.2/POPCNT) for a good balance of performance and compatibility. Close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
 
             ```text
             %APPDATA%\GIMP\3.2\plug-ins
@@ -143,8 +132,6 @@ jobs:
             ```
 
             Restart GIMP, then use `Image > Lanczos Scale...` or `Layer > Lanczos Scale...`.
-
-            Use `lanczos-scale-windows-x86_64-v3.zip` only on modern x86_64 CPUs with AVX2/FMA/BMI-class support.
           draft: false
           prerelease: false
           tag_name: ${{ github.ref_name }}

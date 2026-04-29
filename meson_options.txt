@@ -18,7 +18,6 @@ option(
   'cpu-baseline',
   type: 'combo',
   choices: [
-    'generic',
     'x86-64-v2',
     'x86-64-v3',
     'x86-64-v4',
@@ -26,6 +25,6 @@ option(
     'armv8.2-a',
     'native',
   ],
-  value: 'generic',
-  description: 'Minimum CPU ISA to target. Release builds should provide generic and optimized artifacts separately.',
+  value: 'x86-64-v2',
+  description: 'Minimum CPU ISA to target. x86-64-v2 is the baseline for x86_64 releases; armv8.2-a is the baseline for Apple Silicon releases.',
 )

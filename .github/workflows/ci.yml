@@ -20,17 +20,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            cpu-baseline: generic
-          - os: ubuntu-24.04
-            cpu-baseline: x86-64-v3
-          - os: ubuntu-24.04-arm
-            cpu-baseline: generic
+            cpu-baseline: x86-64-v2
           - os: ubuntu-24.04-arm
             cpu-baseline: armv8-a
           - os: macos-15-intel
-            cpu-baseline: generic
+            cpu-baseline: x86-64-v2
           - os: macos-15
-            cpu-baseline: generic
+            cpu-baseline: armv8.2-a
 
     steps:
       - uses: actions/checkout@v6
@@ -56,12 +52,8 @@ jobs:
         run: meson test -C build --print-errorlogs
 
   windows-plugin:
-    name: Windows plug-in (${{ matrix.cpu-baseline }})
+    name: Windows plug-in (x86-64-v2)
     runs-on: windows-2025
-    strategy:
-      fail-fast: false
-      matrix:
-        cpu-baseline: [ generic, x86-64-v3 ]
 
     defaults:
       run:
@@ -90,7 +82,7 @@ jobs:
         run: >
           meson setup build
           -Dplugin=enabled
-          -Dcpu-baseline=${{ matrix.cpu-baseline }}
+          -Dcpu-baseline=x86-64-v2
           --buildtype=release
           -Db_lto=true
 

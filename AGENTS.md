@@ -27,7 +27,7 @@ This repository contains `Lanczos Scale`, an external GIMP 3 plug-in written in 
 - `tests/test-resample.c`: standalone resampler behavior tests.
 - `meson.build`, `meson_options.txt`: Meson build. The `plugin` feature can be enabled, disabled, or auto-detected.
 - `.github/workflows/ci.yml`: CI for standalone core tests across hosted OS/arch runners plus Windows/MSYS2 plug-in builds.
-- `.github/workflows/release.yml`: version-tag release packaging for Windows x86_64 generic and x86-64-v3 plug-in zips.
+- `.github/workflows/release.yml`: version-tag release packaging for a single Windows x86_64 plug-in zip targeting x86-64-v2.
 - `README.md`: user-facing build/install notes and interpolation guide.
 
 ## Known Local Environment
@@ -71,10 +71,10 @@ If configuring from scratch:
 C:\msys64\usr\bin\bash.exe -lc "export MSYSTEM=CLANG64; export PATH=/clang64/bin:/usr/bin:`$PATH; cd /c/Dev/lanczos && meson setup build-plugin -Dplugin=enabled"
 ```
 
-High-performance release variants use the `cpu-baseline` Meson option. Use `generic` and optimized artifacts side by side; do not publish only an optimized binary.
+High-performance release builds target `x86-64-v2` by default. To build a release plug-in:
 
 ```powershell
-C:\msys64\usr\bin\bash.exe -lc "export MSYSTEM=CLANG64; export PATH=/clang64/bin:/usr/bin:`$PATH; cd /c/Dev/lanczos && meson setup build-plugin-v3 -Dplugin=enabled -Dcpu-baseline=x86-64-v3 --buildtype=release -Db_lto=true"
+C:\msys64\usr\bin\bash.exe -lc "export MSYSTEM=CLANG64; export PATH=/clang64/bin:/usr/bin:`$PATH; cd /c/Dev/lanczos && meson setup build-plugin-v2 -Dplugin=enabled --buildtype=release -Db_lto=true"
 ```
 
 ## Install Command

@@ -13,31 +13,31 @@ project(
 
 cc = meson.get_compiler('c')
 cpu_baseline = get_option('cpu-baseline')
+cpu_family = host_machine.cpu_family()
+march_arg = ''
 
-if cpu_baseline != 'generic'
-  cpu_family = host_machine.cpu_family()
-  march_arg = ''
-
-  if cpu_baseline == 'native'
-    march_arg = '-march=native'
-  elif cpu_baseline.startswith('x86-64')
-    if cpu_family != 'x86_64'
-      error('cpu-baseline ' + cpu_baseline + ' requires an x86_64 target, got ' + cpu_family)
-    endif
-    march_arg = '-march=' + cpu_baseline
-  elif cpu_baseline.startswith('armv8')
-    if cpu_family != 'aarch64'
-      error('cpu-baseline ' + cpu_baseline + ' requires an aarch64 target, got ' + cpu_family)
-    endif
+if cpu_baseline == 'native'
+  march_arg = '-march=native'
+elif cpu_baseline.startswith('x86-64')
+  if cpu_family == 'x86_64'
     march_arg = '-march=' + cpu_baseline
   else
-    error('Unhandled cpu-baseline value: ' + cpu_baseline)
+    warning('cpu-baseline ' + cpu_baseline + ' is for x86_64; skipping on ' + cpu_family)
   endif
+elif cpu_baseline.startswith('armv8')
+  if cpu_family == 'aarch64'
+    march_arg = '-march=' + cpu_baseline
+  else
+    warning('cpu-baseline ' + cpu_baseline + ' is for aarch64; skipping on ' + cpu_family)
+  endif
+else
+  error('Unhandled cpu-baseline value: ' + cpu_baseline)
+endif
 
+if march_arg != ''
   if not cc.has_argument(march_arg)
     error('Compiler ' + cc.get_id() + ' does not support ' + march_arg)
   endif
-
   add_project_arguments(march_arg, language: 'c')
 endif
 
