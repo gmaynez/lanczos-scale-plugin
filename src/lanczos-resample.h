@@ -35,18 +35,22 @@ extern "C" {
 
 typedef enum
 {
-  LANCZOS_KERNEL_2        = 2,
-  LANCZOS_KERNEL_3        = 3,
-  LANCZOS_KERNEL_KAISER_3 = 103,
-  LANCZOS_KERNEL_KAISER_4 = 104,
-  LANCZOS_KERNEL_EWA_JINC = 203,
+  LANCZOS_KERNEL_2               = 2,
+  LANCZOS_KERNEL_3               = 3,
+  LANCZOS_KERNEL_KAISER_3        = 103,
+  LANCZOS_KERNEL_KAISER_4        = 104,
+  LANCZOS_KERNEL_EWA_JINC_SHARP  = 202,
+  LANCZOS_KERNEL_EWA_JINC        = 203,
+  LANCZOS_KERNEL_EWA_JINC_SMOOTH = 204,
 } LanczosKernel;
 
 static_assert(LANCZOS_KERNEL_2 == 2, "kernel enum values must match PDB IDs");
 static_assert(LANCZOS_KERNEL_3 == 3, "kernel enum values must match PDB IDs");
 static_assert(LANCZOS_KERNEL_KAISER_3 == 103, "kernel enum values must match PDB IDs");
 static_assert(LANCZOS_KERNEL_KAISER_4 == 104, "kernel enum values must match PDB IDs");
+static_assert(LANCZOS_KERNEL_EWA_JINC_SHARP == 202, "kernel enum values must match PDB IDs");
 static_assert(LANCZOS_KERNEL_EWA_JINC == 203, "kernel enum values must match PDB IDs");
+static_assert(LANCZOS_KERNEL_EWA_JINC_SMOOTH == 204, "kernel enum values must match PDB IDs");
 
 typedef struct
 {

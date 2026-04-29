@@ -185,9 +185,13 @@ test_kaiser4_constant_rgba_downscale (void)
 static void
 test_ewa_jinc_constant_rgba_downscale (void)
 {
+  static const LanczosKernel kernels[] =
+  {
+    LANCZOS_KERNEL_EWA_JINC_SHARP,
+    LANCZOS_KERNEL_EWA_JINC,
+    LANCZOS_KERNEL_EWA_JINC_SMOOTH,
+  };
   float src[10 * 8 * 4];
-  float dst[4 * 3 * 4] = { 0.0f };
-  int   ok;
 
   for (int i = 0; i < 10 * 8; i++)
     {
@@ -197,19 +201,27 @@ test_ewa_jinc_constant_rgba_downscale (void)
       src[i * 4 + 3] = 0.45f;
     }
 
-  ok = lanczos_resample_float (src, 10, 8, 4, 3,
-                               dst, 4, 3,
-                               LANCZOS_KERNEL_EWA_JINC,
-                               NULL, NULL);
-
-  expect_true ("ewa jinc constant rgba downscale ok", ok);
-
-  for (int i = 0; i < 4 * 3; i++)
+  for (size_t kernel_index = 0;
+       kernel_index < sizeof (kernels) / sizeof (kernels[0]);
+       kernel_index++)
     {
-      expect_near ("ewa jinc constant red",   dst[i * 4 + 0], 0.15f, 1.0e-5f);
-      expect_near ("ewa jinc constant green", dst[i * 4 + 1], 0.35f, 1.0e-5f);
-      expect_near ("ewa jinc constant blue",  dst[i * 4 + 2], 0.65f, 1.0e-5f);
-      expect_near ("ewa jinc constant alpha", dst[i * 4 + 3], 0.45f, 1.0e-5f);
+      float dst[4 * 3 * 4] = { 0.0f };
+      int   ok;
+
+      ok = lanczos_resample_float (src, 10, 8, 4, 3,
+                                   dst, 4, 3,
+                                   kernels[kernel_index],
+                                   NULL, NULL);
+
+      expect_true ("ewa jinc constant rgba downscale ok", ok);
+
+      for (int i = 0; i < 4 * 3; i++)
+        {
+          expect_near ("ewa jinc constant red",   dst[i * 4 + 0], 0.15f, 1.0e-5f);
+          expect_near ("ewa jinc constant green", dst[i * 4 + 1], 0.35f, 1.0e-5f);
+          expect_near ("ewa jinc constant blue",  dst[i * 4 + 2], 0.65f, 1.0e-5f);
+          expect_near ("ewa jinc constant alpha", dst[i * 4 + 3], 0.45f, 1.0e-5f);
+        }
     }
 }
 

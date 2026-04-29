@@ -13,7 +13,9 @@
 #define LANCZOS_ALPHA_EPSILON 1.0e-6
 #define LANCZOS_KAISER_3_BETA 6.5
 #define LANCZOS_KAISER_4_BETA 8.0
+#define LANCZOS_EWA_JINC_SHARP_BETA 4.5
 #define LANCZOS_EWA_JINC_BETA 6.5
+#define LANCZOS_EWA_JINC_SMOOTH_BETA 8.0
 
 static int
 clamp_int (int value,
@@ -109,7 +111,9 @@ lanczos_kernel_is_separable (LanczosKernel kernel)
     case LANCZOS_KERNEL_KAISER_4:
       return true;
 
+    case LANCZOS_KERNEL_EWA_JINC_SHARP:
     case LANCZOS_KERNEL_EWA_JINC:
+    case LANCZOS_KERNEL_EWA_JINC_SMOOTH:
       return false;
     }
 
@@ -119,7 +123,21 @@ lanczos_kernel_is_separable (LanczosKernel kernel)
 bool
 lanczos_kernel_is_ewa (LanczosKernel kernel)
 {
-  return kernel == LANCZOS_KERNEL_EWA_JINC;
+  switch (kernel)
+    {
+    case LANCZOS_KERNEL_EWA_JINC_SHARP:
+    case LANCZOS_KERNEL_EWA_JINC:
+    case LANCZOS_KERNEL_EWA_JINC_SMOOTH:
+      return true;
+
+    case LANCZOS_KERNEL_2:
+    case LANCZOS_KERNEL_3:
+    case LANCZOS_KERNEL_KAISER_3:
+    case LANCZOS_KERNEL_KAISER_4:
+      break;
+    }
+
+  return false;
 }
 
 int
@@ -137,8 +155,12 @@ lanczos_kernel_radius (LanczosKernel kernel)
     case LANCZOS_KERNEL_KAISER_4:
       return 4;
 
+    case LANCZOS_KERNEL_EWA_JINC_SHARP:
     case LANCZOS_KERNEL_EWA_JINC:
       return 3;
+
+    case LANCZOS_KERNEL_EWA_JINC_SMOOTH:
+      return 4;
     }
 
   return 0;
@@ -178,7 +200,33 @@ lanczos_kaiser_beta (LanczosKernel kernel)
 
     case LANCZOS_KERNEL_2:
     case LANCZOS_KERNEL_3:
+    case LANCZOS_KERNEL_EWA_JINC_SHARP:
     case LANCZOS_KERNEL_EWA_JINC:
+    case LANCZOS_KERNEL_EWA_JINC_SMOOTH:
+      break;
+    }
+
+  return 0.0;
+}
+
+static double
+lanczos_ewa_jinc_beta (LanczosKernel kernel)
+{
+  switch (kernel)
+    {
+    case LANCZOS_KERNEL_EWA_JINC_SHARP:
+      return LANCZOS_EWA_JINC_SHARP_BETA;
+
+    case LANCZOS_KERNEL_EWA_JINC:
+      return LANCZOS_EWA_JINC_BETA;
+
+    case LANCZOS_KERNEL_EWA_JINC_SMOOTH:
+      return LANCZOS_EWA_JINC_SMOOTH_BETA;
+
+    case LANCZOS_KERNEL_2:
+    case LANCZOS_KERNEL_3:
+    case LANCZOS_KERNEL_KAISER_3:
+    case LANCZOS_KERNEL_KAISER_4:
       break;
     }
 
@@ -212,9 +260,9 @@ lanczos_kernel_value (double        x,
   if (radius <= 0.0 || ax >= radius)
     return 0.0;
 
-  if (kernel == LANCZOS_KERNEL_EWA_JINC)
-    return lanczos_jinc (x) *
-           lanczos_kaiser_window (x, radius, LANCZOS_EWA_JINC_BETA);
+  beta = lanczos_ewa_jinc_beta (kernel);
+  if (beta > 0.0)
+    return lanczos_jinc (x) * lanczos_kaiser_window (x, radius, beta);
 
   beta = lanczos_kaiser_beta (kernel);
   if (beta > 0.0)

@@ -158,8 +158,12 @@ lanczos_scale_create_kernel_choice (void)
                                       "Kaiser-Sinc 3", NULL,
                                       "kaiser4", LANCZOS_KERNEL_KAISER_4,
                                       "Kaiser-Sinc 4", NULL,
+                                      "ewa-jinc-sharp", LANCZOS_KERNEL_EWA_JINC_SHARP,
+                                      "EWA Jinc Sharp", NULL,
                                       "ewa-jinc", LANCZOS_KERNEL_EWA_JINC,
                                       "EWA Jinc", NULL,
+                                      "ewa-jinc-smooth", LANCZOS_KERNEL_EWA_JINC_SMOOTH,
+                                      "EWA Jinc Smooth", NULL,
                                       NULL);
 }
 

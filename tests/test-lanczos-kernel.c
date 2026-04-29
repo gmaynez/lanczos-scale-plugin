@@ -75,12 +75,65 @@ expect_table_normalized (const char    *label,
   lanczos_contrib_table_free (table);
 }
 
+static void
+expect_ewa_kernel (const char    *label,
+                   LanczosKernel  kernel,
+                   int            radius)
+{
+  LanczosEwaAxisTable  *axis_table;
+  LanczosEwaWeightLut  *weight_lut;
+  const double          r = 0.75;
+  double                cutoff = (double) radius;
+
+  expect_true (label, lanczos_kernel_is_valid (kernel));
+  expect_true ("ewa kernel not separable", ! lanczos_kernel_is_separable (kernel));
+  expect_true ("ewa kernel classified", lanczos_kernel_is_ewa (kernel));
+  expect_true ("ewa radius", lanczos_kernel_radius (kernel) == radius);
+  expect_near ("ewa center", lanczos_kernel_value (0.0, kernel), 1.0, 1.0e-12);
+  expect_near ("ewa cutoff", lanczos_kernel_value (cutoff, kernel), 0.0, 1.0e-12);
+  expect_near ("ewa outside", lanczos_kernel_value (cutoff + 0.1, kernel), 0.0, 1.0e-12);
+  expect_true ("ewa half finite positive",
+               isfinite (lanczos_kernel_value (0.5, kernel)) &&
+               lanczos_kernel_value (0.5, kernel) > 0.0);
+
+  axis_table = lanczos_ewa_axis_table_new (100, 33, kernel);
+  expect_true ("ewa axis table allocated", axis_table != NULL);
+  if (axis_table)
+    {
+      expect_true ("ewa axis table max taps positive", axis_table->max_taps > 0);
+      expect_true ("ewa axis first raw ordered",
+                   axis_table->items[0].raw_start <= axis_table->items[0].raw_end);
+      expect_true ("ewa axis center finite", isfinite (axis_table->items[0].center));
+      expect_true ("ewa axis filter scale positive",
+                   axis_table->items[0].filter_scale > 0.0);
+      lanczos_ewa_axis_table_free (axis_table);
+    }
+
+  weight_lut = lanczos_ewa_weight_lut_new (kernel,
+                                           LANCZOS_EWA_WEIGHT_LUT_SIZE);
+  expect_true ("ewa weight lut allocated", weight_lut != NULL);
+  if (weight_lut)
+    {
+      expect_near ("ewa lut center",
+                   lanczos_ewa_weight_lut_lookup (weight_lut, 0.0),
+                   lanczos_kernel_value (0.0, kernel),
+                   1.0e-12);
+      expect_near ("ewa lut interpolates kernel",
+                   lanczos_ewa_weight_lut_lookup (weight_lut, r * r),
+                   lanczos_kernel_value (r, kernel),
+                   1.0e-4);
+      expect_near ("ewa lut cutoff",
+                   lanczos_ewa_weight_lut_lookup (weight_lut, cutoff * cutoff),
+                   0.0,
+                   1.0e-12);
+      lanczos_ewa_weight_lut_free (weight_lut);
+    }
+}
+
 int
 main (void)
 {
   LanczosContribTable *table;
-  LanczosEwaAxisTable *axis_table;
-  LanczosEwaWeightLut *weight_lut;
 
   expect_near ("sinc zero", lanczos_sinc (0.0), 1.0, 1.0e-12);
   expect_near ("sinc integer", lanczos_sinc (1.0), 0.0, 1.0e-12);
@@ -92,26 +145,22 @@ main (void)
   expect_near ("lanczos2 cutoff", lanczos_kernel_value (2.0, LANCZOS_KERNEL_2), 0.0, 1.0e-12);
   expect_true ("kaiser3 valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_KAISER_3));
   expect_true ("kaiser4 valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_KAISER_4));
-  expect_true ("ewa jinc valid", lanczos_kernel_is_valid (LANCZOS_KERNEL_EWA_JINC));
   expect_true ("invalid kernel not valid", ! lanczos_kernel_is_valid ((LanczosKernel) 4));
   expect_true ("lanczos3 separable", lanczos_kernel_is_separable (LANCZOS_KERNEL_3));
-  expect_true ("ewa jinc not separable", ! lanczos_kernel_is_separable (LANCZOS_KERNEL_EWA_JINC));
-  expect_true ("ewa jinc is ewa", lanczos_kernel_is_ewa (LANCZOS_KERNEL_EWA_JINC));
   expect_true ("kaiser3 radius", lanczos_kernel_radius (LANCZOS_KERNEL_KAISER_3) == 3);
   expect_true ("kaiser4 radius", lanczos_kernel_radius (LANCZOS_KERNEL_KAISER_4) == 4);
-  expect_true ("ewa jinc radius", lanczos_kernel_radius (LANCZOS_KERNEL_EWA_JINC) == 3);
   expect_near ("kaiser3 center", lanczos_kernel_value (0.0, LANCZOS_KERNEL_KAISER_3), 1.0, 1.0e-12);
   expect_near ("kaiser3 cutoff", lanczos_kernel_value (3.0, LANCZOS_KERNEL_KAISER_3), 0.0, 1.0e-12);
   expect_near ("kaiser4 cutoff", lanczos_kernel_value (4.0, LANCZOS_KERNEL_KAISER_4), 0.0, 1.0e-12);
-  expect_near ("ewa jinc center", lanczos_kernel_value (0.0, LANCZOS_KERNEL_EWA_JINC), 1.0, 1.0e-12);
-  expect_near ("ewa jinc cutoff", lanczos_kernel_value (3.0, LANCZOS_KERNEL_EWA_JINC), 0.0, 1.0e-12);
-  expect_near ("ewa jinc outside", lanczos_kernel_value (3.1, LANCZOS_KERNEL_EWA_JINC), 0.0, 1.0e-12);
   expect_true ("kaiser3 half finite positive",
                isfinite (lanczos_kernel_value (0.5, LANCZOS_KERNEL_KAISER_3)) &&
                lanczos_kernel_value (0.5, LANCZOS_KERNEL_KAISER_3) > 0.0);
-  expect_true ("ewa jinc half finite positive",
-               isfinite (lanczos_kernel_value (0.5, LANCZOS_KERNEL_EWA_JINC)) &&
-               lanczos_kernel_value (0.5, LANCZOS_KERNEL_EWA_JINC) > 0.0);
+  expect_ewa_kernel ("ewa jinc sharp valid",
+                     LANCZOS_KERNEL_EWA_JINC_SHARP, 3);
+  expect_ewa_kernel ("ewa jinc valid",
+                     LANCZOS_KERNEL_EWA_JINC, 3);
+  expect_ewa_kernel ("ewa jinc smooth valid",
+                     LANCZOS_KERNEL_EWA_JINC_SMOOTH, 4);
 
   table = lanczos_contrib_table_new (7, 11, LANCZOS_KERNEL_3);
   expect_true ("table allocated", table != NULL);
@@ -157,46 +206,17 @@ main (void)
                lanczos_contrib_table_new (0, 1, LANCZOS_KERNEL_3) == NULL);
   expect_true ("bad kernel rejected",
                lanczos_contrib_table_new (4, 4, (LanczosKernel) 4) == NULL);
+  expect_true ("ewa jinc sharp contribution table rejected",
+               lanczos_contrib_table_new (4, 4,
+                                          LANCZOS_KERNEL_EWA_JINC_SHARP) == NULL);
   expect_true ("ewa jinc contribution table rejected",
                lanczos_contrib_table_new (4, 4, LANCZOS_KERNEL_EWA_JINC) == NULL);
-
-  axis_table = lanczos_ewa_axis_table_new (100, 33, LANCZOS_KERNEL_EWA_JINC);
-  expect_true ("ewa axis table allocated", axis_table != NULL);
-  if (axis_table)
-    {
-      expect_true ("ewa axis table max taps positive", axis_table->max_taps > 0);
-      expect_true ("ewa axis first raw ordered",
-                   axis_table->items[0].raw_start <= axis_table->items[0].raw_end);
-      expect_true ("ewa axis center finite", isfinite (axis_table->items[0].center));
-      expect_true ("ewa axis filter scale positive",
-                   axis_table->items[0].filter_scale > 0.0);
-      lanczos_ewa_axis_table_free (axis_table);
-    }
+  expect_true ("ewa jinc smooth contribution table rejected",
+               lanczos_contrib_table_new (4, 4,
+                                          LANCZOS_KERNEL_EWA_JINC_SMOOTH) == NULL);
 
   expect_true ("non-ewa axis table rejected",
                lanczos_ewa_axis_table_new (4, 4, LANCZOS_KERNEL_3) == NULL);
-
-  weight_lut = lanczos_ewa_weight_lut_new (LANCZOS_KERNEL_EWA_JINC,
-                                           LANCZOS_EWA_WEIGHT_LUT_SIZE);
-  expect_true ("ewa weight lut allocated", weight_lut != NULL);
-  if (weight_lut)
-    {
-      const double r = 0.75;
-
-      expect_near ("ewa lut center",
-                   lanczos_ewa_weight_lut_lookup (weight_lut, 0.0),
-                   lanczos_kernel_value (0.0, LANCZOS_KERNEL_EWA_JINC),
-                   1.0e-12);
-      expect_near ("ewa lut interpolates kernel",
-                   lanczos_ewa_weight_lut_lookup (weight_lut, r * r),
-                   lanczos_kernel_value (r, LANCZOS_KERNEL_EWA_JINC),
-                   1.0e-4);
-      expect_near ("ewa lut cutoff",
-                   lanczos_ewa_weight_lut_lookup (weight_lut, 9.0),
-                   0.0,
-                   1.0e-12);
-      lanczos_ewa_weight_lut_free (weight_lut);
-    }
 
   expect_true ("non-ewa weight lut rejected",
                lanczos_ewa_weight_lut_new (LANCZOS_KERNEL_3,

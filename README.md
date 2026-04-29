@@ -9,7 +9,7 @@
 - Registers `plug-in-lanczos-scale` at `Image > Lanczos Scale...`.
 - Registers `plug-in-lanczos-scale-layer` at `Layer > Lanczos Scale...`.
 - Supports RGB/RGBA and grayscale/gray-alpha drawables.
-- Offers Lanczos3, Lanczos2, experimental Kaiser-windowed sinc kernels, and an experimental EWA Jinc filter.
+- Offers Lanczos3, Lanczos2, experimental Kaiser-windowed sinc kernels, and experimental EWA Jinc filters.
 - Defaults to linear-light float processing while preserving the drawable color space.
 - Handles alpha by premultiplying before filtering and unpremultiplying after filtering.
 - The Image menu operation scales the image canvas, layers, layer masks, channels, and selection to the requested size.
@@ -26,7 +26,9 @@ There is no single best interpolation filter for every image. Use visual compari
 - `Lanczos 2`: smaller support than Lanczos 3. Useful when Lanczos 3 looks too sharp or ringy, with a slightly softer result and lower cost.
 - `Kaiser-Sinc 3`: Lanczos-like sharpness with a Kaiser window. A good first alternative to Lanczos 3 when you want a cleaner edge profile without giving up much crispness.
 - `Kaiser-Sinc 4`: wider, stronger Kaiser-windowed sinc. Best suited to photo downscaling, fine textures, diagonals, and moire-prone reductions where alias rejection matters more than maximum crispness.
-- `EWA Jinc`: experimental non-separable 2D filter with an elliptical footprint. Useful for comparing against the separable filters on diagonals, detailed textures, and non-uniform scaling; it is more computationally expensive than the separable filters.
+- `EWA Jinc Sharp`: experimental non-separable 2D filter with an elliptical footprint and weaker Kaiser damping. Useful when the balanced EWA result is too soft, with more risk of edge halos or aliasing.
+- `EWA Jinc`: balanced experimental EWA Jinc filter. Useful for comparing against the separable filters on diagonals, detailed textures, and non-uniform scaling; it is more computationally expensive than the separable filters.
+- `EWA Jinc Smooth`: wider experimental EWA Jinc filter with stronger Kaiser damping. Best for difficult reductions where alias control matters more than maximum crispness; it is slower than the balanced EWA option.
 
 ## Build
 
@@ -140,4 +142,4 @@ The resampler uses the standard destination-center mapping:
 src = (dst + 0.5) * src_size / dst_size - 0.5
 ```
 
-For separable filters, downscaling widens the support by the inverse scale and evaluates the selected windowed-sinc kernel at `distance * scale` before normalization. The experimental EWA Jinc filter evaluates a 2D elliptical footprint directly. Pixel reads are row-streamed through GEGL with a small row cache instead of allocating a full intermediate image.
+For separable filters, downscaling widens the support by the inverse scale and evaluates the selected windowed-sinc kernel at `distance * scale` before normalization. The experimental EWA Jinc filters evaluate a 2D elliptical footprint directly. Pixel reads are row-streamed through GEGL with a small row cache instead of allocating a full intermediate image.
