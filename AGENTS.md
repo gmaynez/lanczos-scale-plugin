@@ -77,6 +77,14 @@ High-performance release builds target `x86-64-v2` by default. To build a releas
 C:\msys64\usr\bin\bash.exe -lc "export MSYSTEM=CLANG64; export PATH=/clang64/bin:/usr/bin:`$PATH; cd /c/Dev/lanczos && meson setup build-plugin-v2 -Dplugin=enabled --buildtype=release -Db_lto=true"
 ```
 
+**Important build type distinction:**
+- `meson setup` without `--buildtype` creates a **debug** build (`-O0 -g`, no LTO). This produces a much larger, slower executable (~200 KB).
+- Release builds need explicit `--buildtype=release -Db_lto=true` for optimized size and performance (~130 KB).
+- The NSIS installer (`installer/lanczos-scale.nsi`) compiles against `${BUILD_DIR}` which defaults to `build-release`. For local testing, pass the correct build directory:
+  ```powershell
+  makensis /DBUILD_DIR=build-plugin-v2 installer\lanczos-scale.nsi
+  ```
+
 ## Install Command
 
 Manual copy is the most reliable route on this machine. `gimptool-3.2 --install-bin` reported the right destination but failed to copy correctly across Windows/MSYS2 path styles.

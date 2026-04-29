@@ -42,6 +42,7 @@ jobs:
             mingw-w64-clang-x86_64-ninja
             mingw-w64-clang-x86_64-pkgconf
             mingw-w64-clang-x86_64-gimp
+            mingw-w64-clang-x86_64-nsis
 
       - name: Configure
         run: >
@@ -56,6 +57,13 @@ jobs:
 
       - name: Test
         run: meson test -C build-release --print-errorlogs
+
+      - name: Build NSIS installer
+        run: |
+          mkdir -p dist
+          cd installer
+          makensis /DBUILD_DIR=build-release lanczos-scale.nsi
+          mv lanczos-scale-windows-x86_64-installer.exe ../dist/
 
       - name: Package
         shell: pwsh
@@ -96,7 +104,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: lanczos-scale-windows-x86_64
-          path: dist/lanczos-scale-windows-x86_64.zip
+          path: |
+            dist/lanczos-scale-windows-x86_64.zip
+            dist/lanczos-scale-windows-x86_64-installer.exe
 
   publish:
     name: Publish GitHub release
@@ -114,10 +124,18 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            dist/*.exe
           generate_release_notes: true
           body: |
             ## Windows install
+
+            ### Installer (recommended)
+
+            Download and run `lanczos-scale-windows-x86_64-installer.exe`. The installer will detect your GIMP 3 configuration and install the plug-in to the correct location. Close GIMP before installing.
+
+            ### Manual install
 
             Download `lanczos-scale-windows-x86_64.zip`. This build targets x86-64-v2 (SSE3/SSSE3/SSE4.1/SSE4.2/POPCNT) for a good balance of performance and compatibility. Close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
 
