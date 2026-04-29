@@ -477,7 +477,7 @@ lanczos_gegl_resample (GeglBuffer               *src_buffer,
 
   if (src_width <= 0 || src_height <= 0 ||
       dst_width <= 0 || dst_height <= 0 ||
-      format_info->channels <= 0 || format_info->channels > 16 ||
+      format_info->channels <= 0 || format_info->channels > LANCZOS_MAX_CHANNELS ||
       format_info->alpha_channel < -1 ||
       format_info->alpha_channel >= format_info->channels ||
       ! lanczos_kernel_is_valid (kernel))

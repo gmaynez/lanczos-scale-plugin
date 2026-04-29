@@ -1036,7 +1036,7 @@ lanczos_resample_float (const float         *LANCZOS_RESTRICT src,
   if (! src || ! dst ||
       src_width <= 0 || src_height <= 0 ||
       dst_width <= 0 || dst_height <= 0 ||
-      channels <= 0 || channels > 16 ||
+      channels <= 0 || channels > LANCZOS_MAX_CHANNELS ||
       alpha_channel < -1 || alpha_channel >= channels ||
       ! lanczos_kernel_is_valid (kernel))
     return false;

@@ -3,21 +3,31 @@
 #ifndef LANCZOS_RESAMPLE_H
 #define LANCZOS_RESAMPLE_H
 
+#include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifndef LANCZOS_RESTRICT
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
-#define LANCZOS_RESTRICT restrict
-#elif defined(__GNUC__) || defined(__clang__)
-#define LANCZOS_RESTRICT __restrict__
-#elif defined(_MSC_VER)
-#define LANCZOS_RESTRICT __restrict
-#else
+#ifdef __cplusplus
 #define LANCZOS_RESTRICT
+#else
+#define LANCZOS_RESTRICT restrict
 #endif
 #endif
 
+#define LANCZOS_MAX_CHANNELS 16
+
+static_assert(LANCZOS_MAX_CHANNELS > 0 && LANCZOS_MAX_CHANNELS <= 64,
+              "LANCZOS_MAX_CHANNELS must be positive and reasonable");
+
 #define LANCZOS_EWA_WEIGHT_LUT_SIZE 8192
+
+static_assert(LANCZOS_EWA_WEIGHT_LUT_SIZE >= 2,
+              "EWA weight LUT must have at least 2 entries");
+
+static_assert(sizeof (float) == 4, "float must be 4 bytes");
+static_assert(sizeof (double) == 8, "double must be 8 bytes");
+static_assert(sizeof (size_t) >= 4, "size_t must be at least 32 bits");
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +41,12 @@ typedef enum
   LANCZOS_KERNEL_KAISER_4 = 104,
   LANCZOS_KERNEL_EWA_JINC = 203,
 } LanczosKernel;
+
+static_assert(LANCZOS_KERNEL_2 == 2, "kernel enum values must match PDB IDs");
+static_assert(LANCZOS_KERNEL_3 == 3, "kernel enum values must match PDB IDs");
+static_assert(LANCZOS_KERNEL_KAISER_3 == 103, "kernel enum values must match PDB IDs");
+static_assert(LANCZOS_KERNEL_KAISER_4 == 104, "kernel enum values must match PDB IDs");
+static_assert(LANCZOS_KERNEL_EWA_JINC == 203, "kernel enum values must match PDB IDs");
 
 typedef struct
 {
