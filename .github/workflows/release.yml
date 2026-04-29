@@ -61,8 +61,17 @@ jobs:
       - name: Build NSIS installer
         run: |
           mkdir -p dist
+          version="${GITHUB_REF_NAME#v}"
+          IFS=. read -r major minor patch rest <<< "$version"
+          patch="${patch:-0}"
+          product_version="${major}.${minor}.${patch}"
+          product_version_quad="${product_version}.0"
           cd installer
-          makensis -DBUILD_DIR=build-release lanczos-scale.nsi
+          makensis \
+            -DBUILD_DIR=build-release \
+            -DPRODUCT_VERSION="$product_version" \
+            -DPRODUCT_VERSION_QUAD="$product_version_quad" \
+            lanczos-scale.nsi
           mv lanczos-scale-windows-x86_64-installer.exe ../dist/
 
       - name: Package

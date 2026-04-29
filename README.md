@@ -80,9 +80,10 @@ Public Windows releases target `x86-64-v2` as a balance between performance and 
 
 The CI workflow builds and tests the standalone resampler on Linux, macOS, Windows, x86_64, and ARM64 runner families, and builds the full GIMP plug-in on Windows/MSYS2 CLANG64.
 
-Tagging a release with a version tag such as `v1.0` or `v1.2.3` runs the release workflow. It publishes a single Windows x86_64 plug-in zip:
+Tagging a release with a version tag such as `v1.0` or `v1.2.3` runs the release workflow. It publishes Windows x86_64 plug-in artifacts:
 
-- `lanczos-scale-windows-x86_64.zip`: optimized build targeting x86-64-v2 for a balance of performance and compatibility.
+- `lanczos-scale-windows-x86_64-installer.exe`: per-user NSIS installer for GIMP 3.
+- `lanczos-scale-windows-x86_64.zip`: manual-install package targeting x86-64-v2 for a balance of performance and compatibility.
 
 Each release zip includes `INSTALL-WINDOWS.txt`. To install, close GIMP, unzip the package, and copy the contained `lanczos-scale` folder to:
 

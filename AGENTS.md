@@ -27,7 +27,7 @@ This repository contains `Lanczos Scale`, an external GIMP 3 plug-in written in 
 - `tests/test-resample.c`: standalone resampler behavior tests.
 - `meson.build`, `meson_options.txt`: Meson build. The `plugin` feature can be enabled, disabled, or auto-detected.
 - `.github/workflows/ci.yml`: CI for standalone core tests across hosted OS/arch runners plus Windows/MSYS2 plug-in builds.
-- `.github/workflows/release.yml`: version-tag release packaging for a single Windows x86_64 plug-in zip targeting x86-64-v2.
+- `.github/workflows/release.yml`: version-tag release packaging for Windows x86_64 plug-in zip and NSIS installer artifacts targeting x86-64-v2.
 - `README.md`: user-facing build/install notes and interpolation guide.
 
 ## Known Local Environment
@@ -80,9 +80,11 @@ C:\msys64\usr\bin\bash.exe -lc "export MSYSTEM=CLANG64; export PATH=/clang64/bin
 **Important build type distinction:**
 - `meson setup` without `--buildtype` creates a **debug** build (`-O0 -g`, no LTO). This produces a much larger, slower executable (~200 KB).
 - Release builds need explicit `--buildtype=release -Db_lto=true` for optimized size and performance (~130 KB).
-- The NSIS installer (`installer/lanczos-scale.nsi`) compiles against `${BUILD_DIR}` which defaults to `build-release`. For local testing, pass the correct build directory:
+- The NSIS installer (`installer/lanczos-scale.nsi`) compiles against `${BUILD_DIR}` which defaults to `build-release`. For local testing, run it from the installer directory and pass the correct repo-root build directory:
   ```powershell
-  makensis /DBUILD_DIR=build-plugin-v2 installer\lanczos-scale.nsi
+  Push-Location installer
+  makensis /DBUILD_DIR=build-plugin-v2 lanczos-scale.nsi
+  Pop-Location
   ```
 
 ## Install Command
