@@ -62,7 +62,7 @@ jobs:
         run: |
           mkdir -p dist
           cd installer
-          makensis /DBUILD_DIR=build-release lanczos-scale.nsi
+          makensis -DBUILD_DIR=build-release lanczos-scale.nsi
           mv lanczos-scale-windows-x86_64-installer.exe ../dist/
 
       - name: Package
