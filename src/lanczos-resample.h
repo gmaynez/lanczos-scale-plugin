@@ -89,8 +89,32 @@ typedef struct
   LanczosKernel kernel;
   int           size;
   double        radius2;
+  double        pos_scale;
   double       *weights;
 } LanczosEwaWeightLut;
+
+static inline double
+lanczos_ewa_weight_lut_lookup_fast (const LanczosEwaWeightLut *lut,
+                                    double                     r2)
+{
+  double pos;
+  int    index;
+  double frac;
+
+  if (r2 >= lut->radius2)
+    return 0.0;
+
+  pos = r2 * lut->pos_scale;
+  index = (int) pos;
+
+  if (index >= lut->size - 1)
+    return 0.0;
+
+  frac = pos - (double) index;
+
+  return (lut->weights[index] * (1.0 - frac)) +
+         (lut->weights[index + 1] * frac);
+}
 
 typedef void (*LanczosProgressFunc) (double fraction,
                                      void  *data);
@@ -130,6 +154,10 @@ void                  lanczos_resample_store_pixel    (const double          *LA
                                                        float                 *LANCZOS_RESTRICT dst_pixel,
                                                        int                    channels,
                                                        int                    alpha_channel);
+void                  lanczos_resample_store_pixel_ya (const double          *LANCZOS_RESTRICT accum,
+                                                       float                 *LANCZOS_RESTRICT dst_pixel);
+void                  lanczos_resample_store_pixel_rgba (const double        *LANCZOS_RESTRICT accum,
+                                                         float               *LANCZOS_RESTRICT dst_pixel);
 
 bool                  lanczos_resample_float          (const float           *LANCZOS_RESTRICT src,
                                                        int                    src_width,

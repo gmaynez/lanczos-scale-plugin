@@ -300,7 +300,7 @@ ewa_nearest_pixel (GeglBuffer              *src_buffer,
   return src_row + ((gsize) src_x * (gsize) channels);
 }
 
-static void
+static inline void
 ewa_pixel_y (GeglBuffer               *src_buffer,
              gint                      src_width,
              gint                      src_height,
@@ -337,11 +337,8 @@ ewa_pixel_y (GeglBuffer               *src_buffer,
           gint    src_x = clamp_gint (sx, 0, src_width - 1);
           gdouble dist_x = (x_axis->center - (gdouble) sx) *
                            x_axis->filter_scale;
-          gdouble weight = lanczos_ewa_weight_lut_lookup (weight_lut,
-                                                          (dist_x * dist_x) + dist_y2);
-
-          if (weight == 0.0)
-            continue;
+          gdouble weight = lanczos_ewa_weight_lut_lookup_fast (weight_lut,
+                                                               (dist_x * dist_x) + dist_y2);
 
           y += (gdouble) src_row[src_x] * weight;
           weight_sum += weight;
@@ -356,7 +353,7 @@ ewa_pixel_y (GeglBuffer               *src_buffer,
     dst_pixel[0] = (gfloat) (y / weight_sum);
 }
 
-static void
+static inline void
 ewa_pixel_ya (GeglBuffer               *src_buffer,
               gint                      src_width,
               gint                      src_height,
@@ -395,13 +392,10 @@ ewa_pixel_ya (GeglBuffer               *src_buffer,
           gint          src_x = clamp_gint (sx, 0, src_width - 1);
           gdouble       dist_x = (x_axis->center - (gdouble) sx) *
                                  x_axis->filter_scale;
-          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
-                                                                (dist_x * dist_x) + dist_y2);
+          gdouble       weight = lanczos_ewa_weight_lut_lookup_fast (weight_lut,
+                                                                     (dist_x * dist_x) + dist_y2);
           const gfloat *src_pixel;
           gdouble       alpha;
-
-          if (weight == 0.0)
-            continue;
 
           src_pixel = src_row + ((gsize) src_x * 2u);
           alpha = src_pixel[1];
@@ -431,10 +425,10 @@ ewa_pixel_ya (GeglBuffer               *src_buffer,
       accum[1] = a / weight_sum;
     }
 
-  lanczos_resample_store_pixel (accum, dst_pixel, 2, 1);
+  lanczos_resample_store_pixel_ya (accum, dst_pixel);
 }
 
-static void
+static inline void
 ewa_pixel_rgb (GeglBuffer               *src_buffer,
                gint                      src_width,
                gint                      src_height,
@@ -473,12 +467,9 @@ ewa_pixel_rgb (GeglBuffer               *src_buffer,
           gint          src_x = clamp_gint (sx, 0, src_width - 1);
           gdouble       dist_x = (x_axis->center - (gdouble) sx) *
                                  x_axis->filter_scale;
-          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
-                                                                (dist_x * dist_x) + dist_y2);
+          gdouble       weight = lanczos_ewa_weight_lut_lookup_fast (weight_lut,
+                                                                     (dist_x * dist_x) + dist_y2);
           const gfloat *src_pixel;
-
-          if (weight == 0.0)
-            continue;
 
           src_pixel = src_row + ((gsize) src_x * 3u);
 
@@ -509,7 +500,7 @@ ewa_pixel_rgb (GeglBuffer               *src_buffer,
     }
 }
 
-static void
+static inline void
 ewa_pixel_rgba (GeglBuffer               *src_buffer,
                 gint                      src_width,
                 gint                      src_height,
@@ -550,14 +541,11 @@ ewa_pixel_rgba (GeglBuffer               *src_buffer,
           gint          src_x = clamp_gint (sx, 0, src_width - 1);
           gdouble       dist_x = (x_axis->center - (gdouble) sx) *
                                  x_axis->filter_scale;
-          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
-                                                                (dist_x * dist_x) + dist_y2);
+          gdouble       weight = lanczos_ewa_weight_lut_lookup_fast (weight_lut,
+                                                                     (dist_x * dist_x) + dist_y2);
           const gfloat *src_pixel;
           gdouble       alpha;
           gdouble       premul_weight;
-
-          if (weight == 0.0)
-            continue;
 
           src_pixel = src_row + ((gsize) src_x * 4u);
           alpha = src_pixel[3];
@@ -594,10 +582,10 @@ ewa_pixel_rgba (GeglBuffer               *src_buffer,
       accum[3] = a / weight_sum;
     }
 
-  lanczos_resample_store_pixel (accum, dst_pixel, 4, 3);
+  lanczos_resample_store_pixel_rgba (accum, dst_pixel);
 }
 
-static void
+static inline void
 ewa_pixel_generic (GeglBuffer               *src_buffer,
                    gint                      src_width,
                    gint                      src_height,
@@ -639,12 +627,9 @@ ewa_pixel_generic (GeglBuffer               *src_buffer,
           gint          src_x = clamp_gint (sx, 0, src_width - 1);
           gdouble       dist_x = (x_axis->center - (gdouble) sx) *
                                  x_axis->filter_scale;
-          gdouble       weight = lanczos_ewa_weight_lut_lookup (weight_lut,
-                                                                (dist_x * dist_x) + dist_y2);
+          gdouble       weight = lanczos_ewa_weight_lut_lookup_fast (weight_lut,
+                                                                     (dist_x * dist_x) + dist_y2);
           const gfloat *src_pixel;
-
-          if (weight == 0.0)
-            continue;
 
           src_pixel = src_row + ((gsize) src_x * (gsize) channels);
 
@@ -760,67 +745,82 @@ lanczos_gegl_resample_ewa (GeglBuffer               *src_buffer,
         }
     }
 
-  for (gint dy = 0; dy < dst_height; dy++)
+#define EWA_FOR_EACH_PIXEL(call_)                                            \
+  do                                                                        \
+    {                                                                       \
+      for (gint dy = 0; dy < dst_height; dy++)                              \
+        {                                                                   \
+          const LanczosEwaAxisItem *y_axis = &y_table->items[dy];           \
+                                                                            \
+          for (gint dx_out = 0; dx_out < dst_width; dx_out++)               \
+            {                                                               \
+              const LanczosEwaAxisItem *x_axis = &x_table->items[dx_out];   \
+              gfloat                   *dst_pixel = dst_row +               \
+                                                    ((gsize) dx_out *       \
+                                                     (gsize) channels);     \
+                                                                            \
+              call_;                                                        \
+            }                                                               \
+                                                                            \
+          gegl_buffer_set (dst_buffer,                                      \
+                           GEGL_RECTANGLE (0, dy, dst_width, 1),            \
+                           0,                                               \
+                           format_info->format,                             \
+                           dst_row,                                         \
+                           GEGL_AUTO_ROWSTRIDE);                            \
+                                                                            \
+          if (progress)                                                     \
+            progress ((gdouble) (dy + 1) / (gdouble) dst_height,            \
+                      progress_data);                                       \
+        }                                                                   \
+    }                                                                       \
+  while (0)
+
+  switch (layout)
     {
-      const LanczosEwaAxisItem *y_axis = &y_table->items[dy];
+    case EWA_LAYOUT_Y:
+      EWA_FOR_EACH_PIXEL (
+        ewa_pixel_y (src_buffer, src_width, src_height,
+                     format_info, cache, cache_size,
+                     &use_counter, x_axis, y_axis,
+                     weight_lut, dst_pixel));
+      break;
 
-      for (gint dx_out = 0; dx_out < dst_width; dx_out++)
-        {
-          const LanczosEwaAxisItem *x_axis = &x_table->items[dx_out];
-          gfloat                   *dst_pixel = dst_row +
-                                                ((gsize) dx_out *
-                                                 (gsize) channels);
+    case EWA_LAYOUT_YA:
+      EWA_FOR_EACH_PIXEL (
+        ewa_pixel_ya (src_buffer, src_width, src_height,
+                      format_info, cache, cache_size,
+                      &use_counter, x_axis, y_axis,
+                      weight_lut, dst_pixel));
+      break;
 
-          switch (layout)
-            {
-            case EWA_LAYOUT_Y:
-              ewa_pixel_y (src_buffer, src_width, src_height,
+    case EWA_LAYOUT_RGB:
+      EWA_FOR_EACH_PIXEL (
+        ewa_pixel_rgb (src_buffer, src_width, src_height,
+                       format_info, cache, cache_size,
+                       &use_counter, x_axis, y_axis,
+                       weight_lut, dst_pixel));
+      break;
+
+    case EWA_LAYOUT_RGBA:
+      EWA_FOR_EACH_PIXEL (
+        ewa_pixel_rgba (src_buffer, src_width, src_height,
+                        format_info, cache, cache_size,
+                        &use_counter, x_axis, y_axis,
+                        weight_lut, dst_pixel));
+      break;
+
+    case EWA_LAYOUT_GENERIC:
+      EWA_FOR_EACH_PIXEL (
+        ewa_pixel_generic (src_buffer, src_width, src_height,
                            format_info, cache, cache_size,
-                           &use_counter, x_axis, y_axis,
-                           weight_lut, dst_pixel);
-              break;
-
-            case EWA_LAYOUT_YA:
-              ewa_pixel_ya (src_buffer, src_width, src_height,
-                            format_info, cache, cache_size,
-                            &use_counter, x_axis, y_axis,
-                            weight_lut, dst_pixel);
-              break;
-
-            case EWA_LAYOUT_RGB:
-              ewa_pixel_rgb (src_buffer, src_width, src_height,
-                             format_info, cache, cache_size,
-                             &use_counter, x_axis, y_axis,
-                             weight_lut, dst_pixel);
-              break;
-
-            case EWA_LAYOUT_RGBA:
-              ewa_pixel_rgba (src_buffer, src_width, src_height,
-                              format_info, cache, cache_size,
-                              &use_counter, x_axis, y_axis,
-                              weight_lut, dst_pixel);
-              break;
-
-            case EWA_LAYOUT_GENERIC:
-              ewa_pixel_generic (src_buffer, src_width, src_height,
-                                 format_info, cache, cache_size,
-                                 &use_counter, channels, alpha_channel,
-                                 x_axis, y_axis, weight_lut,
-                                 accum, accum_bytes, dst_pixel);
-              break;
-            }
-        }
-
-      gegl_buffer_set (dst_buffer,
-                       GEGL_RECTANGLE (0, dy, dst_width, 1),
-                       0,
-                       format_info->format,
-                       dst_row,
-                       GEGL_AUTO_ROWSTRIDE);
-
-      if (progress)
-        progress ((gdouble) (dy + 1) / (gdouble) dst_height, progress_data);
+                           &use_counter, channels, alpha_channel,
+                           x_axis, y_axis, weight_lut,
+                           accum, accum_bytes, dst_pixel));
+      break;
     }
+
+#undef EWA_FOR_EACH_PIXEL
 
   if (progress)
     progress (1.0, progress_data);
